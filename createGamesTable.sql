@@ -1,0 +1,62 @@
+
+    CREATE TABLE games (
+    gameId INT,
+    gameDate DATE,
+    teamId INT
+    home INT
+    Q1 INT,
+    Q2 INT,
+    Q3 INT,
+    Q4 INT,
+    OT INT,
+    inactive TEXT,
+    pace FLOAT,
+    offRating FLOAT,
+    defRating FLOAT,
+    oppOpenFG3A INT,
+    oppOpenFG3M INT,
+    oppOpenFG2A INT,
+    oppOpenFG2M INT,
+    oppWideOpenFG3A INT,
+    oppWideOpenFG3M INT,
+    oppWideOpenFG2A INT,
+    oppWideOpenFG2M INT,
+    oppResAreaA INT,
+    oppResAreaM INT,
+    oppPaintA INT,
+    oppPaintM INT,
+    oppMidA INT,
+    oppMidM INT,
+    oppLCA INT,
+    oppLCM INT,
+    oppRCA INT,
+    oppRCM INT,
+    oppAboveThreeA INT,
+    oppAboveThreeM,
+    drb0FG2M INT,
+    drb0FG2A INT,
+    drb0FG3M INT,
+    drb0FG3A INT,
+    drb1FG2M INT,
+    drb1FG2A INT,
+    drb1FG3M INT,
+    drb1FG3A INT,
+    drb2FG2M INT,
+    drb2FG2A INT,
+    drb2FG3M INT,
+    drb2FG3A INT,
+    drb36FG2M INT,
+    drb36FG2A INT,
+    drb36FG3M INT,
+    drb36FG3A INT,
+    drb7FG2M INT,
+    drb7FG2A INT,
+    drb7FG3M INT,
+    drb7FG3A INT,
+    PRIMARY KEY (gameId,playerId)
+    FOREIGN KEY teamId
+        RERFERENCES teams(teamId)
+    FOREIGN KEY playerId
+        references players (playerId)
+    )
+    
