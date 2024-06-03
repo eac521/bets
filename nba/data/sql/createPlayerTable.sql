@@ -1,11 +1,9 @@
 
-    CREATE TABLE box (
+    CREATE VIEW playerGame (
     playerId TEXT,
     teamId TEXT,
     gameId TEXT,
     min FLOAT,
-    ftm INT,
-    fta INT,
     resAreaM INT,
     resAreaA INT,
     paintM INT,
@@ -28,6 +26,8 @@
     drbChances INT,
     drbDefer INT,
     avgDrbDist FLOAT,
+    ftm INT,
+    fta INT,
     ast INT,
     tov INT,
     stl INT,
@@ -46,12 +46,7 @@
     defRating FLOAT,
     teamFirstBasket INT,
     gameFirstBasket INT,
-    PRIMARY KEY (playerId,gameId)
-        FOREIGN KEY (playerId )
-            REFERENCES players(playerId)
-        FOREIGN KEY (gameId)
-            REFERENCES games(gameId)
-            
+
     
     )
     
