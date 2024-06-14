@@ -2,7 +2,7 @@ import sqlite3
 import pandas as pd
 import numpy as np
 import re
-from nba_api.stats.endpoints import BoxScoreAdvancedV3,PlayByPlayV2,BoxScoreSummaryV2,LeagueDashTeamShotLocations,LeagueDashOppPtShot,LeagueDashPlayerShotLocations,PlayerGameLogs,TeamInfoCommon,leaguegamefinder
+from nba_api.stats.endpoints import BoxScoreAdvancedV3,PlayByPlayV2,BoxScoreSummaryV2,LeagueDashTeamShotLocations,LeagueDashOppPtShot,LeagueDashPlayerShotLocations,PlayerGameLogs,TeamInfoCommon,leaguegamefinder,LeagueDashPtStats
 from nba_api.stats.static import teams
 class nba:
 
@@ -40,13 +40,13 @@ class nba:
             df = PlayByPlayV2(gameid).get_data_frames()[0]
             aind = df[(df.EVENTMSGTYPE==1) & (df.HOMEDESCRIPTION.notna())].PLAYER1_ID.idxmin()
             hind = df[(df.EVENTMSGTYPE==1) & (df.VISITORDESCRIPTION.notna())].PLAYER1_ID.idxmin()
-            gd = {'gameid':gameid,'homeFirst':1,'homePlayer':df.iloc[hind].PLAYER1_ID,
+            gd = {'gameid':gameid,'homePlayer':df.iloc[hind].PLAYER1_ID,
                   'awayPlayer':df.iloc[aind].PLAYER1_ID,
                   'firstPlayer':df.iloc[min([aind,hind])].PLAYER1_ID}
-            bskts = set([(d['gameid'],v,1,1)  if list(d.values()).count(v) ==2 else (d['gameid'],v,1,0) for d in gd for k,v in d.items() if type(v)!=str])
-            bdf = pd.DataFrame(bskts,columns = ['GAME_ID','PLAYER_ID','teamFirst','gameFirst'])
-            l.append(bdf)
-        df = pd.DataFrame(bdf,columns = ['GAME_ID','PLAYER_ID','teamFirst','gameFirst'])
+            bskts = set([(gd['gameid'],v,1,1)  if list(gd.values()).count(v) ==2 else (gd['gameid'],v,1,0) for k,v in gd.items() if k!='gameid'])
+            #bdf = pd.DataFrame(bskts,columns = ['GAME_ID','PLAYER_ID','teamFirst','gameFirst'])
+            l.append(bskts)
+        df = pd.DataFrame([x for y in l for x in y],columns = ['GAME_ID','PLAYER_ID','team_first','game_first'])
         return df 
 
         
@@ -57,69 +57,67 @@ class nba:
         df = df1.merge(b[1][['TEAM_ID','LARGEST_LEAD','PTS_FB','PTS_2ND_CHANCE','TOTAL_TURNOVERS']])
         df['GAME_ID'] = gameid
         l.append(df.to_dict(orient='records'))
+        return l
         
     def get_opp_open_shot(self,date):
         #team defense shooting
-        l = []
-        #missing = []
+
         t = time.time()
         print('starting at {}'.format(time.strftime('%H:%M')))
         final = pd.DataFrame()
         for ct,date in enumerate(missing):
-            try:
-                d = pd.to_datetime(date)
-                season = '{}-{}'.format(d.year,str(d.year+1)[-2:]) if d.month>=10 else '{}-{}'.format(d.year-1,str(d.year)[-2:])
-                oppShots = LeagueDashTeamShotLocations(measure_type_simple='Opponent',
-                                                  date_from_nullable = date,
-                                                   date_to_nullable = date,
-                                               season=season
-                                   ).get_data_frames()[0]
-                oppShots.columns = ['{}_{}'.format(re.sub(' |-','_',a),b) if a!='' else b for a,b in oppShots.columns]
-                oppShots = oppShots.filter([col for col in oppShots.columns if re.search('_PCT$',col)==None])
-                oppShots['GAME_DATE'] = date
-                wide =  LeagueDashOppPtShot(date_from_nullable = date,
-                                  date_to_nullable = date, season=season,
-                                      close_def_dist_range_nullable = '6+ Feet - Wide Open').get_data_frames()[0]
-                wide = wide.filter([col for col in wide.columns if (re.search('_FREQUENCY$|PCT$|^G|FGM|FGA',col)==None) &
-                                                            (wide[col].dtype!=object)] )
-                wide.columns = [col if re.search('FG',col)==None else 'WIDEOPEN_{}'.format(col) for col in wide.columns]
-                wide['GAME_DATE'] = date
-        
-                op = LeagueDashOppPtShot(date_from_nullable = date,
-                                  date_to_nullable = date,season=season,
-                                      close_def_dist_range_nullable = '4-6 Feet - Open').get_data_frames()[0]
-                op = op.filter([col for col in op.columns if (re.search('_FREQUENCY$|PCT$|^G|FGM|FGA',col)==None) &
-                                                            (op[col].dtype!=object)] )
-                op.columns = [col if re.search('FG',col)==None  else 'OPEN_{}'.format(col) for col in op.columns]
-                op['GAME_DATE'] = date
-                df = oppShots.merge(wide.merge(op,how='left',on=['TEAM_ID','GAME_DATE']),how='left',on=['TEAM_ID','GAME_DATE'])
-                final = pd.concat([df,final])
-                if ct % 18 == 0:
-                    time.sleep(np.random.choice(range(1,12),1)[0])
-                elif (ct % 25 == 0) & (ct!=0):
-                    print('through {} days in {:.2f}'.format(ct,((time.time() -t)/60)))
-                if d in starts or date==game_dates[-1]:
-                    final = final.filter([col.replace('(Non_RA)','Non_RA') for col in final.columns if col!='TEAM_NAME'])
-                    final.to_sql('shotCoverage',db,if_exists='append',index=False) 
-                    print('\tsaved {} season team Shots allowed'.format(season))
-                    final = pd.DataFrame()
-            except:
-                missing.append(date)
-        print('Seasons uploaded, missing {:,} days of games'.format(len(missing)))
-                
+            d = pd.to_datetime(date)
+            season = '{}-{}'.format(d.year,str(d.year+1)[-2:]) if d.month>=10 else '{}-{}'.format(d.year-1,str(d.year)[-2:])
+            oppShots = LeagueDashTeamShotLocations(measure_type_simple='Opponent',
+                                              date_from_nullable = date,
+                                               date_to_nullable = date,
+                                           season=season
+                               ).get_data_frames()[0]
+            oppShots.columns = ['{}_{}'.format(re.sub(' |-','_',a),b) if a!='' else b for a,b in oppShots.columns]
+            oppShots = oppShots.filter([col for col in oppShots.columns if re.search('_PCT$',col)==None])
+            oppShots['GAME_DATE'] = date
+            wide =  LeagueDashOppPtShot(date_from_nullable = date,
+                              date_to_nullable = date, season=season,
+                                  close_def_dist_range_nullable = '6+ Feet - Wide Open').get_data_frames()[0]
+            wide = wide.filter([col for col in wide.columns if (re.search('_FREQUENCY$|PCT$|^G|FGM|FGA',col)==None) &
+                                                        (wide[col].dtype!=object)] )
+            wide.columns = [col if re.search('FG',col)==None else 'WIDEOPEN_{}'.format(col) for col in wide.columns]
+            wide['GAME_DATE'] = date
+    
+            op = LeagueDashOppPtShot(date_from_nullable = date,
+                              date_to_nullable = date,season=season,
+                                  close_def_dist_range_nullable = '4-6 Feet - Open').get_data_frames()[0]
+            op = op.filter([col for col in op.columns if (re.search('_FREQUENCY$|PCT$|^G|FGM|FGA',col)==None) &
+                                                        (op[col].dtype!=object)] )
+            op.columns = [col if re.search('FG',col)==None  else 'OPEN_{}'.format(col) for col in op.columns]
+            op['GAME_DATE'] = date
+            df = oppShots.merge(wide.merge(op,how='left',on=['TEAM_ID','GAME_DATE']),how='left',on=['TEAM_ID','GAME_DATE'])
+        final = pd.concat([df,final])
+        return final
+            
     def get_games(self):
         gamefinder = leaguegamefinder.LeagueGameFinder(league_id_nullable = '00',
-                                               date_from_nullable = '10/01/2017',
+                                               date_from_nullable = '10/01/2023',
                                                season_type_nullable = 'Regular Season'
                                                 
                                                )  
         games = gamefinder.get_data_frames()[0][['GAME_DATE','TEAM_ID','GAME_ID']]
         return games
-    def get_opp_dribble_shot(self,dates):
 
-        drib = ['0 Dribbles','1 Dribble','2 Dribbles','3-6 Dribbles','7+ Dribbles']
-        missing = []
+    def get_advanced_box(self,game_ids):
+        '''will get the pace, possesions, off/def rating and 
+        '''
+        advcols = ['GAME_ID','PLAYER_ID','offensiveRating','defensiveRating','usagePercentage','pace','possessions']
+        df = pd.DataFrame()
+        for gid in game_ids:
+            advbox = BoxScoreAdvancedV3(gid).get_data_frames()[0].rename(columns={'gameId':'GAME_ID','personId':'PLAYER_ID'})
+            advbox = advbox.filter(advcols)
+            df = pd.concat([df,advbox])
+        return df
+        
+    def get_opp_dribble_shot(self,dates):
         final = pd.DataFrame()
+        drib = ['0 Dribbles','1 Dribble','2 Dribbles','3-6 Dribbles','7+ Dribbles']
         t = time.time()
         games = gamefinder.get_data_frames()[0][['GAME_DATE','TEAM_ID','GAME_ID']]
         games.GAME_DATE = pd.to_datetime(games.GAME_DATE)
@@ -129,32 +127,20 @@ class nba:
             d = pd.to_datetime(date)
             season = '{}-{}'.format(d.year,str(d.year+1)[-2:]) if d.month>=10 else '{}-{}'.format(d.year-1,str(d.year)[-2:])
             drb = pd.DataFrame()
-            try:
-                for dribbleCount in drib:
-                    drbShots = LeagueDashOppPtShot(date_from_nullable = date,
-                                        date_to_nullable = date,
-                                                   season=season,
-                                        dribble_range_nullable=dribbleCount).get_data_frames()[0]
-                    df = drbShots.filter([col for col in drbShots.columns if re.search('[2-3][A|M]$|ID$',col)!=None])
-                    df.columns = ['{}_{}'.format(dribbleCount.replace(' ','_'),col) if re.search('ID$',col)==None else col for col in df.columns]
-                    drb = pd.concat([drb,df])
-                    time.sleep(1)
-                drb = drb.merge(games[games.GAME_DATE==d],how='left',on=['TEAM_ID'])
-                drb = drb.groupby(['TEAM_ID','GAME_ID','GAME_DATE']).sum().reset_index()
-            except:
-                missing.append(date)
-            final = pd.concat([final,drb])
-            if ct % 18 == 0:
-                time.sleep(np.random.choice(range(1,12),1)[0])
-            elif (ct % 25 == 0) & (ct!=0):
-                print('through {} days in {:.2f}'.format(ct,((time.time() -t)/60)))
-        
-            if d in self.get_start_dates():
-                drb.to_sql('dribbleStage',db,if_exists='append',index=False)
-                print('\tsaved {} season drible shots'.format(season))
-        print('finished at {}'.format(time.strftime('%H:%M')))
-        print('missing {:_}'.format(len(missing)))        
-                    
+            for dribbleCount in drib:
+                drbShots = LeagueDashOppPtShot(date_from_nullable = date,
+                                    date_to_nullable = date,
+                                               season=season,
+                                    dribble_range_nullable=dribbleCount).get_data_frames()[0]
+                df = drbShots.filter([col for col in drbShots.columns if re.search('[2-3][A|M]$|ID$',col)!=None])
+                df.columns = ['{}_{}'.format(dribbleCount.replace(' ','_'),col) if re.search('ID$',col)==None else col for col in df.columns]
+                drb = pd.concat([drb,df])
+            drb = drb.merge(games[games.GAME_DATE==d],how='left',on=['TEAM_ID'])
+            drb = drb.groupby(['TEAM_ID','GAME_ID','GAME_DATE']).sum().reset_index()
+            final = pd.concat([drb,final])
+            return final
+
+    
     def get_player_shot_spots(self,dates):
         '''Expected Input: list of Dates of the game being played
            Returns: a dataframe containing the player id, game date and their shot attempts and makes from each designated area
@@ -171,30 +157,40 @@ class nba:
             final = df.merge(temp,how='left',on=['GAME_DATE','TEAM_ID'])
         return final
     
-    def get_logs(self,seasons):
+    def get_logs(self,dates):
         '''Expected Input: a list of seasons formatted as YYYY-YY
            Returns: A DataFrame that has each game played by that player and the team, will be used as a base for our gamestats
         '''
+        min_date = min(
         logCols = ['SEASON_YEAR','PLAYER_ID','TEAM_ID','GAME_ID','GAME_DATE','MIN','FTM','FTA','AST','TOV','STL','BLK','BLKA','PF','PFD','PTS','PLUS_MINUS',
  'DD2','TD3']
-        advcols = ['GAME_ID','PLAYER_ID','offensiveRating','defensiveRating','usagePercentage','pace','possessions']
-        bskt = self.get_first_buckets()
-        bskts = set([(d['gameid'],v,1,1)  if list(d.values()).count(v) ==2 else (d['gameid'],v,1,0) for d in bskt for k,v in d.items() if type(v)!=str])
-        bdf = pd.DataFrame(bskts,columns = ['GAME_ID','PLAYER_ID','teamFirst','gameFirst'])
-        advbox = pd.DataFrame([r for d in pd.read_pickle('./nba/data/pickle/advbox.pkl') for r in d]).rename(columns={'game_id':'GAME_ID','personId':'PLAYER_ID'})
-        advbox = advbox.filter(advcols)
-        advbsk = advbox.merge(bdf,how='left',on=['GAME_ID','PLAYER_ID'])
-        for season in seasons:
-            print('{} starting at {}'.format(season,time.strftime('%H:%M')))
-            seasonLog = PlayerGameLogs(season_nullable=season).get_data_frames()[0][logCols]
-            seasonLog = seasonLog.filter(logCols)
+        
+        seasonLog = PlayerGameLogs(date_from_nullable=d).get_data_frames()[0][logCols]
+        seasonLog = seasonLog.filter(logCols)
+
         
         final = seasonLog.merge(advbsk,how='left',on = ['GAME_ID','PLAYER_ID'])
             
         final.to_sql('logStage',db,if_exists='append',index=False)
         
         return df
-        
+    def get_rebounds(self,game_dates):
+        games = self.get_games()
+        min_date = min(game_dates)
+        max_date = max(game_dates)
+        #d = pd.to_datetime(date)
+        #season = '{}-{}'.format(d.year,str(d.year+1)[-2:]) if d.month>=10 else '{}-{}'.format(d.year-1,str(d.year)[-2:])
+    
+        rbs = LeagueDashPtStats(pt_measure_type='Rebounding',player_or_team='Player',
+                               date_from_nullable = min_date,
+                               date_to_nullable = max_date,
+                               season = season
+                               ).get_data_frames()[0][['PLAYER_ID','TEAM_ID','OREB','OREB_CONTEST','OREB_CHANCES','OREB_CHANCE_DEFER','AVG_OREB_DIST',
+                             'DREB','DREB_CONTEST','DREB_CHANCES','DREB_CHANCE_DEFER','AVG_DREB_DIST']]
+        final = rbs.merge(games[games.GAME_DATE==date],how='left',on=['TEAM_ID'])
+    return final
+
+
     def get_roster(self,seasons):
         '''Expected Input: a list of seasons formatted as YYYY-YY
            Returns: A DataFrame that has the first and last game played for the player on each team they played that season
@@ -231,6 +227,33 @@ class nba:
         self.conn.commit()
         return print('{} has been updated with {:,} rows'.format(table,rows))
             
+    def update_shots_allowed(self,dates):
+        '''Pull in prior day's data for team's shot types allowed.  Will need the data and will use the get_opp_dribble_shots and get_opp_op_shot,
+        merge them and insert the new data in the database
+        '''
+        sqlCols = ['team_id','ra_fgm','ra_fga','mid_fgm','mid_fga','lc_fgm','lc_fga','rc_fgm','rc_fga','abv_fgm','abv_fga','bck_fgm','bck_fga',
+ 'crn_fgm','crn_fga','game_date','wide_fg2m','wide_fg2a','wide_fg3m','wide_fg3a','open_fg2m','open_fg2a', 'open_fg3m','open_fg3a','game_id',
+ 'drb0_fg2m','drb0_fg2a','drb0_fg3m','drb0_fg3a','drb1_fg2m','drb1_fg2a','drb1_fg3m','drb1_fg3a','drb2_fg2m','drb2_fg2a','drb2_fg3m','drb2_fg3a',
+ 'drb36_fg2m', 'drb36_fg2a', 'drb36_fg3m', 'drb36_fg3a', 'drb7_fg2m','drb7_fg2a','drb7_fg3m','drb7_fg3a']
+        sqlOrd = ['team_id','game_date','game_id','ra_fgm','ra_fga','mid_fgm','mid_fga','lc_fgm','lc_fga','rc_fgm','rc_fga','abv_fgm',
+                  'abv_fga','bck_fgm','bck_fga','crn_fgm','crn_fga','wide_fg2m','wide_fg2a','wide_fg3m','wide_fg3a','open_fg2m','open_fg2a',
+                  'open_fg3m','open_fg3a','drb0_fg2m','drb0_fg2a','drb0_fg3m','drb0_fg3a','drb1_fg2m','drb1_fg2a','drb1_fg3m','drb1_fg3a',
+                  'drb2_fg2m','drb2_fg2a','drb2_fg3m','drb2_fg3a','drb36_fg2m', 'drb36_fg2a', 'drb36_fg3m', 'drb36_fg3a','drb7_fg2m',
+                  'drb7_fg2a','drb7_fg3m','drb7_fg3a']
+        drb = self.get_opp_dribble_shot(dates)
+        sht = self.get_opp_open_shot(dates)
+        final = sht.merge(drb,how='inner',on=['GAME_ID','TEAM_ID'])
+        if final.shape[0]!=drb.shape[0] | final.shape[0]!=sht.shape[0]:
+            print('Error in merging')
+        else:
+            final.columns = sqlCols
+            final = final.filter(sqlOrd)
+            self.insert_data(final,'shotsAllowed')
+    def update_player_log(self,game_dates):
+        '''Pull in prior days game log information for each player.  Will pull in the log, first basket, rebounds and shooting stats for each   player. '''
+        log = self.get_logs(game_dates)
+        bskt = self.get_first_buckets(games[games.GAME_DATE==date])
+        rbs = self.get_rebounds(game_dates)
             
-            
+        
         
