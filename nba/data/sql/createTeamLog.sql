@@ -1,6 +1,7 @@
 
     CREATE TABLE teamLog(
         game_id TEXT,
+        game_date TEXT,
         team_id TEXT,
         inactive TEXT,
         count_inactive INT,
@@ -11,11 +12,21 @@
         possessions INT,
         off_reb_pct FLOAT,
         def_reb_pct FLOAT,
+        second_pts INT,
+        fastb_pts INT,
+        tm_to INT,
+        to_pts INT,
         home INT,
         q1_pts INT,
         q2_pts INT,
         q3_pts INT,
         q4_pts INT,
+        ot1_pts INT,
+        ot2_pts INT,
+        ot3_pts INT,
+        ot4_pts INT,
+        win INT,
+        season TEXT,
         PRIMARY KEY (game_id,team_id)
     )
     

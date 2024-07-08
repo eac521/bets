@@ -1,13 +1,13 @@
 
     CREATE TABLE teams(
-    teamId TEXT,
+    team_id TEXT,
     teamAbrv TEXT,
     teamName TEXT,
     teamConference TEXT,
     teamDivision TEXT,
     teamLong FLOAT,
     teamLAT FLOAT,
-    PRIMARY KEY (teamId)
+    PRIMARY KEY (team_id)
     
     )
     
