@@ -176,15 +176,38 @@ class nba:
         #print(missing)
         self.insert_data(df.filter(sqlorder),'teamLog')
         return df
-        
-    def get_opp_open_shot(self,game_dates):
+    def get_open_shot_allowed(self,game_dates):
+        final = pd.DataFrame()
+        for ct, date in enumerate(tqdm(game_dates)):
+            d = pd.to_datetime(date)
+            season = '{}-{}'.format(d.year, str(d.year + 1)[-2:]) if d.month >= 10 else '{}-{}'.format(d.year - 1,
+                                                                                                       str(d.year)[-2:])
+            wide = LeagueDashOppPtShot(date_from_nullable=date,
+                                       date_to_nullable=date, season=season,
+                                       close_def_dist_range_nullable='6+ Feet - Wide Open').get_data_frames()[0]
+            wide = wide.filter([col for col in wide.columns if (re.search('_FREQUENCY$|PCT$|^G|FGM|FGA', col) == None) &
+                                (wide[col].dtype != object)])
+            wide.columns = [col if re.search('FG', col) == None else 'WIDEOPEN_{}'.format(col) for col in wide.columns]
+            wide['GAME_DATE'] = date
+
+            op = LeagueDashOppPtShot(date_from_nullable=date,
+                                     date_to_nullable=date, season=season,
+                                     close_def_dist_range_nullable='4-6 Feet - Open').get_data_frames()[0]
+            op = op.filter([col for col in op.columns if (re.search('_FREQUENCY$|PCT$|^G|FGM|FGA', col) == None) &
+                            (op[col].dtype != object)])
+            op.columns = [col if re.search('FG', col) == None else 'OPEN_{}'.format(col) for col in op.columns]
+            op['GAME_DATE'] = date
+            df = wide.merge(op, how='left', on=['TEAM_ID', 'GAME_DATE'])
+            final = pd.concat([final,df])
+        return final
+    def get_opp_shot_spot(self,game_dates):
         '''get the type of shots (ranges) that a team allows, will also get the number of wide-open and open 2 and 3pt looks a team allows.  This needs to be done day-by-day as the granularity is only by team, so we can not get game-by-game information.
         Inputs: needs a list of game dates
         output: DataFrame containing each game and the number of open 2pt/3pt shots, number of wide open 2pt/3pt shots and the shot distribution by ranges
         '''
         #team defense shooting
         final = pd.DataFrame()
-        for ct,date in enumerate(game_dates):
+        for ct,date in enumerate(tqdm(game_dates)):
             d = pd.to_datetime(date)
             season = '{}-{}'.format(d.year,str(d.year+1)[-2:]) if d.month>=10 else '{}-{}'.format(d.year-1,str(d.year)[-2:])
             oppShots = LeagueDashTeamShotLocations(measure_type_simple='Opponent',
@@ -195,26 +218,11 @@ class nba:
             oppShots.columns = ['{}_{}'.format(re.sub(' |-','_',a),b) if a!='' else b for a,b in oppShots.columns]
             oppShots = oppShots.filter([col for col in oppShots.columns if re.search('_PCT$|NAME|^Backcourt',col)==None])
             oppShots['GAME_DATE'] = date
-            wide =  LeagueDashOppPtShot(date_from_nullable = date,
-                              date_to_nullable = date, season=season,
-                                  close_def_dist_range_nullable = '6+ Feet - Wide Open').get_data_frames()[0]
-            wide = wide.filter([col for col in wide.columns if (re.search('_FREQUENCY$|PCT$|^G|FGM|FGA',col)==None) &
-                                                        (wide[col].dtype!=object)] )
-            wide.columns = [col if re.search('FG',col)==None else 'WIDEOPEN_{}'.format(col) for col in wide.columns]
-            wide['GAME_DATE'] = date
-    
-            op = LeagueDashOppPtShot(date_from_nullable = date,
-                              date_to_nullable = date,season=season,
-                                  close_def_dist_range_nullable = '4-6 Feet - Open').get_data_frames()[0]
-            op = op.filter([col for col in op.columns if (re.search('_FREQUENCY$|PCT$|^G|FGM|FGA',col)==None) &
-                                                        (op[col].dtype!=object)] )
-            op.columns = [col if re.search('FG',col)==None  else 'OPEN_{}'.format(col) for col in op.columns]
-            op['GAME_DATE'] = date
-            df = oppShots.merge(wide.merge(op,how='left',on=['TEAM_ID','GAME_DATE']),how='left',on=['TEAM_ID','GAME_DATE'])
-            final = pd.concat([df,final])
-        return final.reset_index(drop=True)
+            final = pd.concat([oppShots,final])
+            #time.sleep(np.random.choice(range(4,10)))
+        return final
             
-    def get_games(self,minDate,maxDate):
+    def get_games(self,minDate,maxDate,add_season=False):
         '''Get a dataframe containing the game date, game_id and team_id, will get two rows for each game, one for each team.
         Input(s): minDate is the start date, maxDate is the end date, these dates are inclusive
         output: DataFrame with columns: GAME_DATE, TEAM_ID, GAME_ID
@@ -227,8 +235,11 @@ class nba:
                                                 
                                                )  
         games = gamefinder.get_data_frames()[0][['GAME_DATE','TEAM_ID','GAME_ID']]
-        return games
-
+        if add_season == False:
+            return games
+        else:
+            games['season'] =   ['{}-{}'.format(x[:4],int(x[2:4])+1) if int(x[5:7]) > 9 else '{}-{}'.format(int(x[:4])-1,x[2:4]) for x in games.GAME_DATE]
+            return games
     def get_advanced_box(self,game_dates):
         '''will get the pace, possesions, off/def rating and usage
         Inputs: will need a list of dates
@@ -256,9 +267,8 @@ class nba:
         
         
         drib = ['0 Dribbles','1 Dribble','2 Dribbles','3-6 Dribbles','7+ Dribbles']
-        games = self.get_games(min(game_dates),max(game_dates))
         final = pd.DataFrame()
-        for ct,date in enumerate(game_dates):
+        for ct,date in enumerate(tqdm(game_dates)):
             d = pd.to_datetime(date)
             season = '{}-{}'.format(d.year,str(d.year+1)[-2:]) if d.month>=10 else '{}-{}'.format(d.year-1,str(d.year)[-2:])
             drb = pd.DataFrame()
@@ -270,8 +280,8 @@ class nba:
                 df = drbShots.filter([col for col in drbShots.columns if re.search('[2-3][A|M]$|ID$',col)!=None])
                 df.columns = ['{}_{}'.format(dribbleCount.replace(' ','_'),col) if re.search('ID$',col)==None else col for col in df.columns]
                 drb = pd.concat([drb,df])
-            drb = drb.merge(games,how='left',on=['TEAM_ID'])
-            drb = drb.groupby(['TEAM_ID','GAME_ID','GAME_DATE']).sum().reset_index()
+                drb['GAME_DATE'] = date
+            drb = drb.groupby(['TEAM_ID','GAME_DATE']).sum().reset_index()
             final = pd.concat([final,drb])
         return final
 
@@ -374,11 +384,11 @@ class nba:
 
     
     def insert_data(self,data,table):
-        cols = pd.read_sql('''
-        PRAGMA table_info({})
-        '''.format(table),self.conn).name.values
+        # cols = pd.read_sql('''
+        # PRAGMA table_info({})
+        # '''.format(table),self.conn).name.values
         rows = data.shape[0]
-        v = '?' + ',?' * (len(cols)-1)
+        v = '?' + ',?' * (data.shape[1] -1)
         self.cur.executemany('''insert into {t} values ({v})'''.format(t=table,v=v),data.values.tolist())
         self.conn.commit()
         return print('{} has been updated with {:,} rows'.format(table,rows))
@@ -387,19 +397,28 @@ class nba:
         '''Pull in prior day's data for team's shot types allowed.  Will need the data and will use the get_opp_dribble_shots and get_opp_op_shot,
         merge them and insert the new data in the database
         '''
-        sqlCols = ['team_id','ra_fgm','ra_fga','paint_fgm','paint_fga','mid_fgm','mid_fga','lc_fgm','lc_fga','rc_fgm','rc_fga','abv_fgm','abv_fga','bck_fgm','bck_fga','crn_fgm','crn_fga','game_date','wide_fg2m','wide_fg2a','wide_fg3m','wide_fg3a','open_fg2m','open_fg2a', 'open_fg3m','open_fg3a','game_id','drb0_fg2m','drb0_fg2a','drb0_fg3m','drb0_fg3a','drb1_fg2m','drb1_fg2a','drb1_fg3m','drb1_fg3a','drb2_fg2m','drb2_fg2a','drb2_fg3m','drb2_fg3a','drb36_fg2m', 'drb36_fg2a', 'drb36_fg3m', 'drb36_fg3a','drb7_fg2m','drb7_fg2a', 'drb7_fg3m','drb7_fg3a']
-        sqlOrd = ['team_id','game_date','game_id','ra_fgm','ra_fga','paint_fgm','paint_fga','mid_fgm','mid_fga','lc_fgm','lc_fga','rc_fgm','rc_fga','abv_fgm','abv_fga','bck_fgm','bck_fga','crn_fgm','crn_fga','wide_fg2m','wide_fg2a','wide_fg3m','wide_fg3a','open_fg2m', 'open_fg2a','open_fg3m','open_fg3a','drb0_fg2m','drb0_fg2a','drb0_fg3m','drb0_fg3a','drb1_fg2m','drb1_fg2a','drb1_fg3m', 'drb1_fg3a','drb2_fg2m','drb2_fg2a','drb2_fg3m','drb2_fg3a','drb36_fg2m', 'drb36_fg2a','drb36_fg3m','drb36_fg3a','drb7_fg2m',
-    'drb7_fg2a','drb7_fg3m','drb7_fg3a']
+        sqlOrd = ['TEAM_ID', 'GAME_DATE', 'GAME_ID', 'Restricted_Area_OPP_FGM', 'Restricted_Area_OPP_FGA',
+                  'In_The_Paint_(Non_RA)_OPP_FGM', 'In_The_Paint_(Non_RA)_OPP_FGA',
+                  'Mid_Range_OPP_FGM', 'Mid_Range_OPP_FGA', 'Left_Corner_3_OPP_FGM',
+                  'Left_Corner_3_OPP_FGA', 'Right_Corner_3_OPP_FGM',
+                  'Right_Corner_3_OPP_FGA', 'Above_the_Break_3_OPP_FGM',
+                  'Above_the_Break_3_OPP_FGA', 'Corner_3_OPP_FGM', 'Corner_3_OPP_FGA', 'WIDEOPEN_FG2M', 'WIDEOPEN_FG2A',
+                  'WIDEOPEN_FG3M', 'WIDEOPEN_FG3A', 'OPEN_FG2M', 'OPEN_FG2A', 'OPEN_FG3M', 'OPEN_FG3A',
+                  '0_Dribbles_FG2M', '0_Dribbles_FG2A', '0_Dribbles_FG3M',
+                  '0_Dribbles_FG3A', '1_Dribble_FG2M', '1_Dribble_FG2A', '1_Dribble_FG3M',
+                  '1_Dribble_FG3A', '2_Dribbles_FG2M', '2_Dribbles_FG2A',
+                  '2_Dribbles_FG3M', '2_Dribbles_FG3A', '3-6_Dribbles_FG2M',
+                  '3-6_Dribbles_FG2A', '3-6_Dribbles_FG3M', '3-6_Dribbles_FG3A',
+                  '7+_Dribbles_FG2M', '7+_Dribbles_FG2A', '7+_Dribbles_FG3M',
+                  '7+_Dribbles_FG3A'
+                  ]
         drb = self.get_opp_dribble_shot(game_dates)
-        sht = self.get_opp_open_shot(game_dates)
+        spots = self.get_opp_shot_spot(game_dates)
+        op = self.get_open_shot_allowed((game_dates))
+        sht = spots.merge(op,how='LEFT',on=['GAME_DATE','TEAM_ID'])
         final = sht.merge(drb,how='inner',on=['GAME_DATE','TEAM_ID'])
-
-        if final.shape[0]!=drb.shape[0] | final.shape[0]!=sht.shape[0]:
-            print('Error in merging')
-        else:
-            final.columns = sqlCols
-            final = final.filter(sqlOrd)
-            self.insert_data(final,'shotsAllowed')
+        final = final.filter(sqlOrd)
+        self.insert_data(final,'shotsAllowed')
             
             
     def update_player_log(self,game_dates,seasons=None):
