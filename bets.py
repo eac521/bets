@@ -13,7 +13,7 @@ class nba:
         self.db = './data/database/nba.db'
         self.conn = sqlite3.connect(self.db)
         self.cur = self.conn.cursor()
-        self.showTables = pd.read_sql("SELECT * FROM sqlite_master WHERE type='table';",self.conn)
+        self.showTables = pd.read_sql("SELECT * FROM sqlite_master WHERE type in ('table','view');",self.conn)
         self.headers = {
                  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36'
 }
