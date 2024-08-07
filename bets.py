@@ -24,7 +24,10 @@ class nba:
         '''This will get the last game loaded in the table
         '''
         return pd.read_sql('select max(game_date) as date from {}'.format(table),db).date[0]
-        
+    # def player_data_prep(self,df,where_clause = None)
+    #     '''This will return a dataframe that is cleaned and ready for modeling
+
+    
     def get_awards(self,pid):
         '''Get the Most Improved, MVP, DPOY, All-NBA, All-D and All-stars appearances, will get one row per player with each appearance listed
         Inputs: player id
@@ -43,6 +46,7 @@ class nba:
         for col in df.columns:
             if col!='PERSON_ID':
                 df[col] = [','.join(x) if x!='None' else x for x in df[col]]
+        
         time.sleep(np.random.choice(range(2,5)))
         return df
     
@@ -67,15 +71,21 @@ class nba:
         df.columns = ['PLAYER_ID','TEAM_ID','ra_fgm','ra_fga','paint_fgm','paint_fga','mid_fgm','mid_fga','lc_fgm',
                       'lc_fga','rc_fgm','rc_fga','abv_fgm','abv_fga']
         return df
-    
+    # def show_player_demo(self):
+    #     sql = pd.read_sql('select * from players',nba.conn)
+    #     df['allstarCount'] = sql.allstars.str.split(',').str.len().fillna(0)
+    #     df['lastAllStar'] = [max(l) if l!=None else 0 for l in sql.allstars.str.split(',')]
+    #     df['allNBA1'] = 
+        
+        
     def update_player_info(self,seasons):
         curdb = [x[0] for x in self.conn.execute('select distinct player_id from players').fetchall()]
         final = pd.DataFrame()
         plyers = []
         sqlord = ['PERSON_ID','DISPLAY_FIRST_LAST','HEIGHT','WEIGHT','POSITION','DRAFT_YEAR','DRAFT_NUMBER','BIRTHDATE',
-                  'NBA All-Star', 'All-Defensive Team1', 'All-Defensive Team2', 'All-NBA1','All-NBA2','All-NBA3',
-                  'NBA Most Valuable Player', 'NBA Finals Most Valuable Player','NBA Defensive Player of the Year',
-                  'NBA Most Improved Player(null)']
+                  'NBA All-Star', 'All-NBA1','All-NBA2','All-NBA3','All-Defensive Team1', 'All-Defensive Team2',
+                  'NBA Most Improved Player(null)','NBA Defensive Player of the Year','NBA Most Valuable Player',
+                  'NBA Finals Most Valuable Player']
         for season in seasons:
             pi = PlayerIndex(season=season).get_data_frames()[0]
             pi['PERSON_ID'] = pi.PERSON_ID.astype(str)
@@ -90,10 +100,13 @@ class nba:
             final = pd.concat([final,ply])
 
             time.sleep(np.random.choice(range(2,5)))
-            if ct % 500==0 and ct != 0:
+            if ct % 50==0 and ct != 0:
                 time.sleep(300)
-            if ct % 250 ==0 and ct != 0:
-                final.to_pickle('nba/data/pickle/awards.pkl')
+            try:
+                if ct % 25 ==0 and ct != 0:
+                    final.to_pickle('data/pickle/awards.pkl')
+            except:
+                print('couldnt find file')
         for col in sqlord:
             if col not in final.columns:
                 final[col] = None
@@ -442,10 +455,11 @@ class nba:
          'mid_fga', 'lc_fgm','lc_fga', 'rc_fgm','rc_fga','abv_fgm', 'abv_fga', 'offensiveRating','defensiveRating',
          'usagePercentage', 'pace', 'possessions','team_first', 'game_first']
         final = final.filter(pd.read_sql('select * from plyrLogs limit 1',self.conn).columns.values)
+        return final
         self.insert_data(final,'plyrLogs')
         
         return final
-
+    
     def reload_table(self,table, filepath=None, data=None):
         if data is None:
             data = pd.read_sql('SELECT * FROM teams', self.conn)

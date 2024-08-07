@@ -1,11 +1,11 @@
 
-CREATE VIEW pseason AS
-SELECT name,
-teamAbrv as team, RANK() OVER(PARTITION BY log.team_id,season ORDER BY log.game_date) game_number,   
-season,
+CREATE VIEW pgames AS
+SELECT name, teamAbrv as team, game_number,season,
 plogs.*
-
-FROM teamLog log
-JOIN plyrLogs plogs USING (team_id,game_id)
+from plyrLogs plogs
+JOIN 
+    (SELECT team_id,season,game_id,
+    RANK() OVER(PARTITION BY team_id,season ORDER BY game_date) game_number   
+    from teamLog) tm USING (team_id,game_id) 
 JOIN teams tms USING (team_id)
 JOIN players USING (player_id)

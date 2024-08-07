@@ -3,7 +3,7 @@ CREATE VIEW team_def AS
 select 
 season, substr(sht.game_date,6,2) as month, teamAbrv as team, rank() OVER(PARTITION BY team_id,season ORDER BY sht.game_date) game_number,
 count_inactive,def_rate,
-pace * 2 - possessions as possessionsAllowed, round((pace * 2 - possessions) * def_rate / 100) as points_allowed,
+round(pace  * def_rate / 100) as points_allowed,
 win, home, sht.*
 from  shotsAllowed sht
 JOIN teamLog log USING (team_id,game_id)
