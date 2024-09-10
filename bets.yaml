@@ -1,4 +1,4 @@
-name: base
+name: bets
 channels:
   - defaults
 dependencies:
