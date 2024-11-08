@@ -46,4 +46,5 @@ rc_fgm INT,
 rc_fga INT,
 abv_fgm INT,
 abv_fga INT,
+started INT,
  PRIMARY KEY (player_id,game_id) )
