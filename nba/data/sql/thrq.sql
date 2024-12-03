@@ -87,7 +87,7 @@ WHERE player_id in --changing logic for runs - updating now for current year 11/
                     WHERE season = '2024-25'
                     and min is not Null
                     GROUP BY player_id
-                    HAVING (AVG(coalesce(lc_fga,0) + coalesce(rc_fga,0) + coalesce(abv_fga,0)) >= 3
+                    HAVING (AVG(coalesce(lc_fga,0) + coalesce(rc_fga,0) + coalesce(abv_fga,0)) >= 2.2
                     )
                     )
 --adding filter for 

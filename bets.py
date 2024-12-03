@@ -3,10 +3,11 @@ import sqlite3
 import pandas as pd
 import numpy as np
 import requests
+import pickle
 import re
 from sklearn.preprocessing import StandardScaler
 #nba api import
-from nba_api.stats.endpoints import BoxScoreAdvancedV3,PlayByPlayV2,BoxScoreSummaryV2,LeagueDashTeamShotLocations,LeagueDashOppPtShot,LeagueDashPlayerShotLocations,PlayerGameLogs,TeamInfoCommon,leaguegamefinder,LeagueDashPtStats,PlayerIndex,CommonPlayerInfo, PlayerAwards, GameRotation
+from nba_api.stats.endpoints import BoxScoreAdvancedV3,PlayByPlayV2,BoxScoreSummaryV2,LeagueDashTeamShotLocations,LeagueDashOppPtShot,LeagueDashPlayerShotLocations,PlayerGameLogs,TeamInfoCommon,leaguegamefinder,LeagueDashPtStats,PlayerIndex,CommonPlayerInfo, PlayerAwards, GameRotation,LeagueDashPlayerPtShot
 
 pd.options.mode.chained_assignment = None
 #time related imports
@@ -33,7 +34,18 @@ class nba:
     # def player_data_prep(self,df,where_clause = None)
     #     '''This will return a dataframe that is cleaned and ready for modeling
 
-    
+    def derive_season(self,date):
+        '''Get date as a string value and determine the season.
+           Inputs: Date as YYYY-MM-DD
+           output: Season as YYYY-YY
+        '''
+        if isinstance(date,str):
+            date = pd.to_datetime(date)
+        if d.month <=9:
+            return '{:%Y}-{:%y}'.format(pd.to_datetime(d)-  pd.to_timedelta(365.25,'days'),pd.to_datetime(d))
+        else:
+            return '{:%Y}-{:%y}'.format(pd.to_datetime(d),pd.to_datetime(d) + pd.to_timedelta(365.25,'days'))
+            
     def get_awards(self,pid):
         '''Get the Most Improved, MVP, DPOY, All-NBA, All-D and All-stars appearances, will get one row per player with each appearance listed
         Inputs: player id
@@ -130,12 +142,18 @@ class nba:
                gameids = games.GAME_ID.unique() 
         for ct,gameid in enumerate(tqdm(gameids)):
             df = PlayByPlayV2(gameid).get_data_frames()[0]
-            aind = df[(df.EVENTMSGTYPE==1) & (df.HOMEDESCRIPTION.notna())].PLAYER1_ID.idxmin()
-            hind = df[(df.EVENTMSGTYPE==1) & (df.VISITORDESCRIPTION.notna())].PLAYER1_ID.idxmin()
-            gd = {'gameid':gameid,'homePlayer':df.iloc[hind].PLAYER1_ID,
-                  'awayPlayer':df.iloc[aind].PLAYER1_ID,
-                  'firstPlayer':df.iloc[min([aind,hind])].PLAYER1_ID}
-            bskts = set([(gd['gameid'],v,1,1)  if list(gd.values()).count(v) ==2 else (gd['gameid'],v,1,0) for k,v in gd.items() if k!='gameid'])
+            try:
+                aind = df[(df.EVENTMSGTYPE==1) & (df.HOMEDESCRIPTION.notna())].PLAYER1_ID.idxmin()
+                hind = df[(df.EVENTMSGTYPE==1) & (df.VISITORDESCRIPTION.notna())].PLAYER1_ID.idxmin()
+                gd = {'gameid':gameid,'homePlayer':df.iloc[hind].PLAYER1_ID,
+                      'awayPlayer':df.iloc[aind].PLAYER1_ID,
+                      'firstPlayer':df.iloc[min([aind,hind])].PLAYER1_ID}
+                bskts = set([(gd['gameid'],v,1,1)  if list(gd.values()).count(v) ==2 else (gd['gameid'],v,1,0) for k,v in gd.items() if k!='gameid'])
+            except:
+                gd = {'gameid':gameid,'homePlayer':'999',
+                      'awayPlayer':'999',
+                      'firstPlayer':'999'}
+                bskts = set([(gd['gameid'],v,1,1)  if list(gd.values()).count(v) ==2 else (gd['gameid'],v,1,0) for k,v in gd.items() if k!='gameid'])
             #bdf = pd.DataFrame(bskts,columns = ['GAME_ID','PLAYER_ID','teamFirst','gameFirst'])
             l.append(bskts)
             time.sleep(np.random.choice(range(1,5)))
@@ -153,7 +171,7 @@ class nba:
         strD = ','.join(["'{}'".format(d) for d in game_ids])
         sqlorder = ['GAME_ID','GAME_DATE','TEAM_ID','inactive','count_inactive','assistPercentage','offensiveRating',
                     'defensiveRating','pace','possessions','offensiveReboundPercentage','defensiveReboundPercentage',
-                    'PTS_2ND_CHANCE','PTS_FB','TEAM_TURNOVERS','home','PTS_OFF_TO','PTS_QTR1','PTS_QTR2','PTS_QTR3',
+                    'PTS_2ND_CHANCE','PTS_FB','TEAM_TURNOVERS','PTS_OFF_TO','home','PTS_QTR1','PTS_QTR2','PTS_QTR3',
                     'PTS_QTR4','PTS_OT1','PTS_OT2','PTS_OT3','PTS_OT4','wins','season']
         df = pd.DataFrame()
         for ct,gameid in enumerate(tqdm(game_ids)):
@@ -333,6 +351,35 @@ class nba:
             time.sleep(np.random.choice(range(1,5)))
         print('completed player shots at {}'.format(time.strftime('%H:%M')))
         return final
+
+    def get_plyr_drb_shots(self,game_dates,addSleep=False):
+        '''will be used to create shots allowed by team
+        Input(s): list of game dates
+        Output  : dataframe at the the level of each team game, will have columns for each area for each dribble type 0,1,2,3-6 and 7+ dribbles 
+        '''
+        
+        drib = ['0 Dribbles','1 Dribble','2 Dribbles','3-6 Dribbles','7+ Dribbles']
+        final = pd.DataFrame()
+        for ct,date in enumerate(tqdm(game_dates)):
+            d = pd.to_datetime(date)
+            season = '{}-{}'.format(d.year,str(d.year+1)[-2:]) if d.month>=10 else '{}-{}'.format(d.year-1,str(d.year)[-2:])
+            drb = pd.DataFrame()
+            for dribbleCount in drib:
+                drbShots = LeagueDashPlayerPtShot(date_from_nullable = date,
+                                    date_to_nullable = date,
+                                               season=season,
+                                    dribble_range_nullable=dribbleCount).get_data_frames()[0]
+                if addSleep:
+                    time.sleep(np.random.randint(2,8))
+                df = drbShots.filter([col for col in drbShots.columns if re.search('[2-3][A|M]$|ID$',col)!=None])
+                df.columns = ['{}_{}'.format(dribbleCount.replace(' ','_'),col) if re.search('ID$',col)==None else col for col in df.columns]
+                drb = pd.concat([drb,df])
+                drb['GAME_DATE'] = date
+            drb = drb.groupby(['PLAYER_ID','GAME_DATE','PLAYER_LAST_TEAM_ID']).sum().reset_index()
+            final = pd.concat([final,drb])
+        return final
+
+    
     def get_schedule(self,season):
         '''No Built in functionality to pull upcoming season, this will get upcoming games
         Inputs: Season as YYYY-YY
@@ -530,7 +577,7 @@ class nba:
         plsh = self.rolling_player_shot(thr)
         final = thr.merge(plsh,how='left',on=['player_id','game_date']).merge(tmsa,how='left',on=['game_date','opp_id'])
         #dropping the fga columns as they have been used for shots and shots allowed
-        final.drop(['ra_fga','mid_fga','paint_fga','crn_fga','abv_fga'],axis=1,inplace=True)
+        final.drop(['ra_fga','mid_fga','paint_fga'],axis=1,inplace=True)
         #fill na for first game/opp game of season, adding in a 9 as this is similar to the all-star break 
         final.daysBetweenGames.fillna(9,inplace = True)
         final.oppDaysLastGame.fillna(9,inplace=True)
@@ -564,8 +611,10 @@ class nba:
         pdf = df[['opp_id','game_date']]
         for col in shots:
            
-            pdf['{}skew'.format(col)] = df.groupby(['opp_id'])[col].rolling(15,closed='left',min_periods = 5).skew().values
-            pdf['{}kurt'.format(col)] = df.groupby(['opp_id'])[col].rolling(15,closed='left',min_periods = 5).kurt().values
+            skew = df.groupby(['opp_id'])[col].rolling(15,closed='left',min_periods=5).skew()
+            kurt = df.groupby(['opp_id'])[col].rolling(15,closed='left',min_periods=5).kurt()
+            pdf = pdf.join(skew.reset_index(name='{}skew'.format(col)).set_index('level_1').drop('opp_id',axis=1))
+            pdf = pdf.join(kurt.reset_index(name='{}kurt'.format(col)).set_index('level_1').drop('opp_id',axis=1))
         
         return pdf
 
@@ -580,8 +629,10 @@ class nba:
         shotdf = pd.DataFrame()
         pdf = df[['game_date','player_id']]
         for col in shots:
-            pdf['{}skew'.format(col)] = df.groupby(['player_id'])[col].rolling(15,closed='left',min_periods=5).skew().values
-            pdf['{}kurt'.format(col)] = df.groupby(['player_id'])[col].rolling(15,closed='left',min_periods=5).kurt().values
+            skew = df.groupby(['player_id'])[col].rolling(15,closed='left',min_periods=5).skew()
+            kurt = df.groupby(['player_id'])[col].rolling(15,closed='left',min_periods=5).kurt()
+            pdf = pdf.join(skew.reset_index(name='{}skew'.format(col)).set_index('level_1').drop('player_id',axis=1))
+            pdf = pdf.join(kurt.reset_index(name='{}kurt'.format(col)).set_index('level_1').drop('player_id',axis=1))
 
         return pdf
 
@@ -657,17 +708,25 @@ class nba:
                 return int(1 -(100/(1-x) - 100))
             
     def scaleData(self,X):
+        d = pickle.loads(open('./data/model/scalVals.pkl','rb').read())
+        for col in d.keys():
+           X[col] = (X[col] - d.get(col).get('mean')) / d.get(col).get('std')
+        return X
+    def updateScaler(self,X):
         ss = StandardScaler()
-        scaleCols = ['mvAvgThrees', 'mvAvgUsage', 'mvAvgOffRating', 'mvAvgFtPrct',
+        d = {}
+        scaleCols = ['mvAvgThrees', 'mvAvgUsage', 'mvAvgOffRating', 'mvAvgFtPrct','daysBetweenGames', 'gamesInFive',
+               'gamesInThree', 'oppGamesFive', 'oppGamesThree', 'oppDaysLastGame',
                'mvAvgThrPtPrct', 'seasonUsage', 'seasonOffRating', 'seasonFtPrct',
                'seasonThrPtPrct', 'careerFtPrct', 'careerThrPtPrct', 'careerUsage',
                'careerOffRating', 'careerAvgThrees', 'mvAvgOppPace', 'mvAvgOppOpen3',
                'mvAvgOppWide3', 'mvAvgOppDefRating', 'seasonOppPace', 'seasonOppOpen3',
-               'seasonOppWide3', 'seasonOppDefRating','height','exp','age','daysBetweenGames', 'gamesInFive',
-               'gamesInThree', 'oppGamesFive', 'oppGamesThree', 'oppDaysLastGame']
-        for col in X.filter(scaleCols):
-           X[col] = ss.fit_transform(X[col].values.reshape(-1,1))
-        return X
+               'seasonOppWide3', 'seasonOppDefRating','height','exp','age','daysBetweenGames', 'gamesInFive',]
+        for col in scaleCols:
+            X[col] = ss.fit_transform(X[col].values.reshape(-1,1))
+            d[col] = {'mean':ss.mean_,'std':ss.var_**.5}
+        pickle.dump(d,open('data/model/scalVals.pkl','wb'))
+                
     def kellyCrit(self,prob,odds):
         if odds > 0:
             return prob - (1-prob) / (odds / 100)

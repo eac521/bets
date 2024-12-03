@@ -16,6 +16,7 @@ height, exp, age,
 
 --shot locations, will have percentiles done in pandas
 ra_fga, paint_fga, mid_fga, (coalesce(lc_fga,0) + coalesce(rc_fga,0)) crn_fga, abv_fga,
+    
 
 --games info
 daysBetweenGames, gamesInFive, gamesInThree, oppGamesFive, OppGamesThree, oppDaysLastGame, home, plyrGameCt, tmGameCt,
