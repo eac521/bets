@@ -3,18 +3,82 @@ import sqlite3
 import pandas as pd
 import numpy as np
 import requests
+import json
 import pickle
 import re
 from sklearn.preprocessing import StandardScaler
+import datetime as dt
 #nba api import
 from nba_api.stats.endpoints import BoxScoreAdvancedV3,PlayByPlayV2,BoxScoreSummaryV2,LeagueDashTeamShotLocations,LeagueDashOppPtShot,LeagueDashPlayerShotLocations,PlayerGameLogs,TeamInfoCommon,leaguegamefinder,LeagueDashPtStats,PlayerIndex,CommonPlayerInfo, PlayerAwards, GameRotation,LeagueDashPlayerPtShot
-
+#removing chained assignment warnings
 pd.options.mode.chained_assignment = None
+
 #time related imports
 import time
 from tqdm import tqdm
-#we are missing shooting data for these dates:
-class nba:
+
+class betting():
+    '''
+    Creating general betting functions that will be shared between NFL and NBA
+    '''
+    def __init__(self,configPath='config.json'):
+        self.dct = json.loads(open(configPath,'r').read())
+        self.freeApi = dct.get('oddsApi').get('free')
+        self.paid = dct.get('oddsApi').get('paid')
+        self.nbaEvents = 'https://api.the-odds-api.com/v4/sports/basketball_nba/events?apiKey={}&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'
+        self.nflEvents = elf.events = 'https://api.the-odds-api.com/v4/sports/UPDATE/events?apiKey={}&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'
+        self.todayISO = (dt.datetime.now()).strftime('%Y-%m-%dT%H:%M:00Z')
+        self.tomorISO = (dt.datetime.now() + dt.timedelta(1)).strftime('%Y-%m-%dT%H:%M:00z')
+
+    def oddsData(self, eventURL):
+        '''
+    ISO Formatted dates for today and tomorrow returns the games that will be played today ids for odds pulls
+    Inputs: isoformatted dates for today and tomorrow
+    Output: list of game ids
+    '''
+        if int(requests.get(eventURL.format(self.free,self.todayISO,self.tomorISO)).headers['x-requests-used'])==500:
+            print('Free is out')
+            r = requests.get(eventURL.format(self.paid,self.todayISO,self.tomorISO))
+            print(r.headers)
+            key = self.paid
+        else:
+            r = requests.get(eventURL.format(self.free,self.todayISO,self.tomorISO))
+            print('Free:',r.headers)
+            key = self.free
+        
+        return [d['id'] for d in r.json()],key
+
+    def kellyCrit(self,prob,odds):
+        '''
+        Calculates the kelly criterion to help determin betting size, will give as a percentage of bankroll to use
+        Inputs: your probability of the event winning, odds (American) that you will be paid out if the win occurs
+        Outputs: a float with the amount of your bankroll
+        '''
+        if odds > 0:
+            return prob - (1-prob) / (odds / 100)
+        else:
+            return prob - (1-prob) / (100/np.abs(odds))
+
+    def convertPercentToOdds(self,x):
+        '''
+        Take a decimal value and convert that into a US betting odd
+        input: float value
+        Output: int 
+        '''
+        if x < .5:
+            if x<=.01:
+                return 9900
+            else:
+                return int(100/x -100)
+                
+        else:
+            if x >= .99:
+                return -9900
+            else:
+                return int(1 -(100/(1-x) - 100))
+
+
+class nba():
 
     def __init__(self):
         self.db = './data/database/nba.db'
@@ -24,16 +88,10 @@ class nba:
         self.headers = {
                  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36'
 }
-    def get_start_dates(self):
-        return ['2017-10-17','2018-10-16','2019-10-22','2021-10-19','2022-10-18','2023-10-24']
+        #self.players = pd.read_sql('select * from roster_view')
+        self.teams = pd.read_sql('select team_id,teamAbrv from teams',self.conn)
+        self.curSeasonStart = "2024-10-01"
         
-    def get_last_game(self,table):
-        '''This will get the last game loaded in the table
-        '''
-        return pd.read_sql('select max(game_date) as date from {}'.format(table),db).date[0]
-    # def player_data_prep(self,df,where_clause = None)
-    #     '''This will return a dataframe that is cleaned and ready for modeling
-
     def derive_season(self,date):
         '''Get date as a string value and determine the season.
            Inputs: Date as YYYY-MM-DD
@@ -89,14 +147,13 @@ class nba:
         df.columns = ['PLAYER_ID','TEAM_ID','ra_fgm','ra_fga','paint_fgm','paint_fga','mid_fgm','mid_fga','lc_fgm',
                       'lc_fga','rc_fgm','rc_fga','abv_fgm','abv_fga']
         return df
-    # def show_player_demo(self):
-    #     sql = pd.read_sql('select * from players',self.conn)
-    #     df['allstarCount'] = sql.allstars.str.split(',').str.len().fillna(0)
-    #     df['lastAllStar'] = [max(l) if l!=None else 0 for l in sql.allstars.str.split(',')]
-    #     df['allNBA1'] = 
         
         
     def update_player_info(self,seasons):
+        '''Need to run this when getting new players as well
+        Inputs: list of season
+        Output: Update of how many rows where added
+        '''
         curdb = [x[0] for x in self.conn.execute('select distinct player_id from players').fetchall()]
         final = pd.DataFrame()
         plyers = []
@@ -128,11 +185,16 @@ class nba:
         for col in sqlord:
             if col not in final.columns:
                 final[col] = None
-        
+        return final
         self.insert_data(final.filter(sqlord),'players')
         return final
             
     def get_first_buckets(self,game_dates):
+        '''
+        Goes through the play-by-play data and grabs the first basket by the home and away team and puts down the first team and game bucket
+        Input: list of game dates - can be the min/max if doing more than two
+        Output: dataframe
+        '''
         l = []
         print('getting first buckets : at {}'.format(time.strftime('%H:%M')))
         games = self.get_games(min(game_dates),max(game_dates))
@@ -143,11 +205,13 @@ class nba:
         for ct,gameid in enumerate(tqdm(gameids)):
             df = PlayByPlayV2(gameid).get_data_frames()[0]
             try:
-                aind = df[(df.EVENTMSGTYPE==1) & (df.HOMEDESCRIPTION.notna())].PLAYER1_ID.idxmin()
-                hind = df[(df.EVENTMSGTYPE==1) & (df.VISITORDESCRIPTION.notna())].PLAYER1_ID.idxmin()
-                gd = {'gameid':gameid,'homePlayer':df.iloc[hind].PLAYER1_ID,
-                      'awayPlayer':df.iloc[aind].PLAYER1_ID,
-                      'firstPlayer':df.iloc[min([aind,hind])].PLAYER1_ID}
+                aind = df[(df.EVENTMSGTYPE==1) & (df.HOMEDESCRIPTION.notna())].PLAYER1_ID.values[0]
+                aev = df[(df.EVENTMSGTYPE==1) & (df.PLAYER1_ID==aind)].EVENTNUM.min()
+                hind = df[(df.EVENTMSGTYPE==1) & (df.VISITORDESCRIPTION.notna())].PLAYER1_ID.values[0]
+                hev = df[(df.EVENTMSGTYPE==1) & (df.PLAYER1_ID==hind)].EVENTNUM.min()
+                gd = {'gameid':gameid,'homePlayer':hind,
+                      'awayPlayer':aind,
+                      'firstPlayer':aind if aev < hev else hind}
                 bskts = set([(gd['gameid'],v,1,1)  if list(gd.values()).count(v) ==2 else (gd['gameid'],v,1,0) for k,v in gd.items() if k!='gameid'])
             except:
                 gd = {'gameid':gameid,'homePlayer':'999',
@@ -168,15 +232,13 @@ class nba:
         Inputs: List of game_ids
         Output: write to sqlite table and a df
         '''
-        strD = ','.join(["'{}'".format(d) for d in game_ids])
+        
         sqlorder = ['GAME_ID','GAME_DATE','TEAM_ID','inactive','count_inactive','assistPercentage','offensiveRating',
                     'defensiveRating','pace','possessions','offensiveReboundPercentage','defensiveReboundPercentage',
                     'PTS_2ND_CHANCE','PTS_FB','TEAM_TURNOVERS','PTS_OFF_TO','home','PTS_QTR1','PTS_QTR2','PTS_QTR3',
                     'PTS_QTR4','PTS_OT1','PTS_OT2','PTS_OT3','PTS_OT4','wins','season']
         df = pd.DataFrame()
         for ct,gameid in enumerate(tqdm(game_ids)):
-            #try:
-            
             b = BoxScoreSummaryV2(game_id=gameid).get_data_frames()
             gameDate = b[0].GAME_DATE_EST.str[:10][0]
             d = pd.to_datetime(gameDate)
@@ -212,14 +274,8 @@ class nba:
             #df.to_pickle('nba/data/pickle/teamlog5.pkl')
             if ct % 150 == 0 and ct != 0 :
                 time.sleep(np.random.choice(range(10,30)))
-            #except:
-                #missing.append(gameid)
-        #print(missing)
-        if (pd.read_sql("select count(*) as ct  from teamLog where game_id in ({})".format(strD),self.conn).sum()>0).all():
-            self.conn.execute("DELETE FROM teamLog where game_id in ({})".format(strD))
-            self.conn.commit()
+        return df.filter(sqlorder)
         
-        self.insert_data(df.filter(sqlorder),'teamLog')
     def get_open_shot_allowed(self,game_dates):
         final = pd.DataFrame()
         for ct, date in enumerate(tqdm(game_dates)):
@@ -241,9 +297,13 @@ class nba:
                             (op[col].dtype != object)])
             op.columns = [col if re.search('FG', col) == None else 'OPEN_{}'.format(col) for col in op.columns]
             op['GAME_DATE'] = date
-            df = wide.merge(op, how='left', on=['TEAM_ID', 'GAME_DATE'])
-            final = pd.concat([final,df])
+            try:
+                df = wide.merge(op, how='left', on=['TEAM_ID', 'GAME_DATE'])
+                final = pd.concat([final,df])
+            except:
+                print('{} no distance from shooter data'.format(date))
         return final
+        
     def get_opp_shot_spot(self,game_dates):
         '''get the type of shots (ranges) that a team allows, will also get the number of wide-open and open 2 and 3pt looks a team allows.  This needs to be done day-by-day as the granularity is only by team, so we can not get game-by-game information.
         Inputs: needs a list of game dates
@@ -284,6 +344,7 @@ class nba:
         else:
             games['season'] =   ['{}-{}'.format(x[:4],int(x[2:4])+1) if int(x[5:7]) > 9 else '{}-{}'.format(int(x[:4])-1,x[2:4]) for x in games.GAME_DATE]
             return games
+            
     def get_advanced_box(self,game_dates):
         '''will get the pace, possesions, off/def rating and usage
         Inputs: will need a list of dates
@@ -311,8 +372,6 @@ class nba:
         Input(s): list of game dates
         Output  : dataframe at the the level of each team game, will have columns for each area for each dribble type 0,1,2,3-6 and 7+ dribbles 
         '''
-        
-        
         drib = ['0 Dribbles','1 Dribble','2 Dribbles','3-6 Dribbles','7+ Dribbles']
         final = pd.DataFrame()
         for ct,date in enumerate(tqdm(game_dates)):
@@ -333,7 +392,7 @@ class nba:
         return final
 
     
-    def get_player_shot_spots(self,game_dates):
+    def get_player_shot_spots(self,game_dates,qtr=0):
         '''Expected Input: list of Dates of the game being played
            Returns: a dataframe containing the player id, game date and their shot attempts and makes from each designated area
         '''
@@ -343,12 +402,14 @@ class nba:
             d = pd.to_datetime(date)
             season = '{}-{}'.format(d.year,str(d.year+1)[-2:]) if d.month>=10 else '{}-{}'.format(d.year-1,str(d.year)[-2:])
             sht = LeagueDashPlayerShotLocations(date_from_nullable = date,
-                                         date_to_nullable = date,
-                                         season=season).get_data_frames()[0]
+                                     date_to_nullable = date,
+                                         season=season,period = qtr).get_data_frames()[0]
             df = self.clean_shotcolumns(sht)
             df['GAME_DATE'] = date
             final = pd.concat([final,df])
             time.sleep(np.random.choice(range(1,5)))
+            if np.random.randint(0,100) % 5 == 0:
+                time.sleep(np.random.choice(range(7,37)))
         print('completed player shots at {}'.format(time.strftime('%H:%M')))
         return final
 
@@ -393,7 +454,7 @@ class nba:
         return df
 
     
-    def get_logs(self,game_dates,seasons=None):
+    def get_logs(self,game_dates,seasons=None,qtr=0):
         '''Expected Input: a list of seasons formatted as YYYY-YY
            Returns: A DataFrame that has each game played by that player and the team, will be used as a base for our gamestats
         '''
@@ -407,7 +468,7 @@ class nba:
         maxD = pd.to_datetime(maxDate)
         if seasons is not None:
             for season in seasons:
-                seasonLog = PlayerGameLogs(season_nullable = season).get_data_frames()[0][logCols]
+                seasonLog = PlayerGameLogs(season_nullable = season,period_nullable=qtr).get_data_frames()[0][logCols]
                 seasonLog = seasonLog.filter(logCols)
                 seasonLog.GAME_DATE = seasonLog.GAME_DATE.apply(lambda x: x[:10])
                 final = pd.concat([final,seasonLog])
@@ -416,7 +477,7 @@ class nba:
             season = '{}-{}'.format(minD.year,str(minD.year+1)[-2:]) if minD.month>=10 else '{}-{}'.format(minD.year-1,str(minD.year)[-2:])
             seasonLog = PlayerGameLogs(date_from_nullable = minD.strftime('%m/%d/%Y'),
                                        date_to_nullable = maxD.strftime('%m/%d/%Y'),
-                                      season_nullable = season).get_data_frames()[0][logCols]
+                                      season_nullable = season, period_nullable = qtr).get_data_frames()[0][logCols]
             seasonLog = seasonLog.filter(logCols)
             seasonLog.GAME_DATE = seasonLog.GAME_DATE.apply(lambda x: x[:10])
             seasonLog = seasonLog[seasonLog.GAME_DATE.isin(game_dates)]
@@ -426,7 +487,12 @@ class nba:
         print('ended player logs at {}'.format(time.strftime('%H:%M')))
         return final
     
-    def get_rebounds(self,game_dates):
+    def get_rebounds(self,game_dates,qtr=0):
+        '''
+        Get rebounding information at the player level
+        Inputs: game dates you are running for
+        Output: DataFrame with rebounding related columns
+        '''
         print('started rebounds at {}'.format(time.strftime('%H:%M')))
         minDate,maxDate = min(game_dates),max(game_dates)
         games = self.get_games(minDate,maxDate)
@@ -457,17 +523,6 @@ class nba:
         return df
     
     
-    def get_team_info(self):
-        '''This can just run called as all team_ids will be loaded when the module is instantiated
-        '''
-        df = pd.DataFrame()
-        for teamId in self.teams:
-            t = TeamInfoCommon(teamId)
-            t = t.get_data_frames()[0][['TEAM_ID','TEAM_ABBREVIATION','TEAM_CITY','TEAM_CONFERENCE','TEAM_DIVISION']]
-            df = pd.concat([df,t])
-        df['lat'] = None
-        df['long'] = None
-        return df.to_dict(orient='records')
 
     
     def insert_data(self,data,table):
@@ -485,8 +540,11 @@ class nba:
         return print('{} has been updated with {:,} rows'.format(table,rows))
             
     def update_shots_allowed(self,game_dates):
-        '''Pull in prior day's data for team's shot types allowed.  Will need the data and will use the get_opp_dribble_shots and get_opp_op_shot,
+        '''Pull in prior day's data for team's shot types allowed. 
+        Will need the data and will use the get_opp_dribble_shots and get_opp_op_shot,
         merge them and insert the new data in the database
+        Inputs: game dates as a list
+        Output: A message stating that the shots allowed data in the database has been updated.
         '''
         strD = ','.join(["'{}'".format(d) for d in game_dates])
         sqlOrd = ['TEAM_ID', 'GAME_DATE', 'GAME_ID', 'Restricted_Area_OPP_FGM', 'Restricted_Area_OPP_FGA',
@@ -511,10 +569,13 @@ class nba:
         print('Completed spot data')
         op = self.get_open_shot_allowed((game_dates))
         print('Completed open shot data')
-
-        sht = spots.merge(op,how='left',on=['GAME_DATE','TEAM_ID'])
-        final = sht.merge(drb,how='inner',on=['GAME_DATE','TEAM_ID'])
-        final = final.merge(games,how='left', on=['GAME_DATE','TEAM_ID'])
+        
+        sht = spots.merge(drb,how='left',on=['GAME_DATE','TEAM_ID'])
+        if len(op) != 0:
+            final = sht.merge(op,how='left',on=['GAME_DATE','TEAM_ID'])
+            final = final.merge(games,how='left', on=['GAME_DATE','TEAM_ID'])
+        else:
+            final = sht.merge(games,how='left', on=['GAME_DATE','TEAM_ID'])
         final = final.filter(sqlOrd)
         if (pd.read_sql("select count(*) as ct  from shotsAllowed where game_date in ({})".format(strD),self.conn).sum()>0).all():
             self.conn.execute("DELETE FROM shotsAllowed where game_date in ({})".format(strD))
@@ -522,8 +583,11 @@ class nba:
         self.insert_data(final,'shotsAllowed')
             
             
-    def update_player_log(self,game_dates,seasons=None):
-        '''Pull in prior days game log information for each player.  Will pull in the log, first basket, rebounds and shooting stats for each   player. '''
+    def update_player_log(self,game_dates,seasons=None, insert=True):
+        '''Pull in prior days game log information for each player.  
+        Will pull in the log, first basket, rebounds and shooting stats for each player.
+        Inputs: list of game_dates, optionally can add the season to pull if many dates
+        Output: DataFrame with player logs, first buckets, rebounds, shooting locations and advanced stats, also will message plyrLogs updated.'''
         #get the individual dataframes
         strD = ','.join(["'{}'".format(d) for d in game_dates])
         log = self.get_logs(game_dates,seasons) #has all 4
@@ -543,17 +607,34 @@ class nba:
          'dreb_contest','dreb_chances','dreb_chance_defer','avg_dreb_dist','ra_fgm','ra_fga', 'paint_fgm', 'paint_fga','mid_fgm',
          'mid_fga', 'lc_fgm','lc_fga', 'rc_fgm','rc_fga','abv_fgm', 'abv_fga', 'offensiveRating','defensiveRating',
          'usagePercentage', 'pace', 'possessions','Starter','team_first', 'game_first']
-        final = final.filter(pd.read_sql('select * from plyrLogs limit 1',self.conn).columns.values)
-        if (pd.read_sql("select count(*) as ct  from plyrLogs where game_date in ({})".format(strD,strD),self.conn).sum()>0).all():
-            self.conn.execute("DELETE FROM plyrLogs where game_date in ({})".format(strD))
+        if insert == False:
+            return final.filter(pd.read_sql('select * from plyrLogs limit 1',self.conn).columns.values)
+        else:
+            final = final.filter(pd.read_sql('select * from plyrLogs limit 1',self.conn).columns.values)
+            if (pd.read_sql("select count(*) as ct  from plyrLogs where game_date in ({})".format(strD,strD),self.conn).sum()>0).all():
+                self.conn.execute("DELETE FROM plyrLogs where game_date in ({})".format(strD))
+                self.conn.commit()
+            self.insert_data(final,'plyrLogs')
+            
+            return final
+
+    def update_teamLog(self,game_ids):
+        strD = ','.join(["'{}'".format(d) for d in game_ids])
+        df = self.get_summary(game_ids)
+        sqlorder = self.cur.execute('select * from teamLog limit 1').description
+        if (pd.read_sql("select count(*) as ct  from teamLog where game_id in ({})".format(strD),self.conn).sum()>0).all():
+            self.conn.execute("DELETE FROM teamLog where game_id in ({})".format(strD))
             self.conn.commit()
-        self.insert_data(final,'plyrLogs')
         
-        return final
+        self.insert_data(df,'teamLog')
     
     def reload_table(self,table, filepath=None, data=None):
+        '''
+        Will update table with new data
+        Input: table name, if no other data provided, will pull current data to re-insert'
+        '''
         if data is None:
-            data = pd.read_sql('SELECT * FROM teams', self.conn)
+            data = pd.read_sql('SELECT * FROM {}'.format(table), self.conn)
         try:
             self.conn.execute('DROP TABLE {}'.format(table))
             self.conn.commit()
@@ -584,13 +665,6 @@ class nba:
         # final = final[final.game_date==date]
         return final
         
-    def probDf(self,probs,y,addDf,ind):
-        df = pd.DataFrame(probs,index = ind)
-        df['probOccur+'] =  [sum(probs[act:]) if act != 0 else probs[0] for probs,act in zip(probs,y.values)]
-        df['probExact'] = [probs[act] for probs,act in zip(df.values,y.values)]
-        df['actuals'] = y.values
-        df = df.join(addDf.loc[ind][['name','game_date']]).reset_index(drop=True)
-        return df
 
     def rolling_team_sa(self):
         '''
@@ -663,8 +737,8 @@ class nba:
 
                 from team_def
                 group by season
-            
-            ''' ,self.conn).shift()
+                HAVING season is not Null
+            ''' ,self.conn).set_index('season').reset_index().shift()
         data.mvAvgThrees = np.where(data.mvAvgThrees.isna(),data.careerAvgThrees,data.mvAvgThrees)
         data.mvAvgUsage = np.where(data.mvAvgUsage.isna(),data.careerUsage,data.mvAvgUsage)
         data.mvAvgOffRating = np.where(data.mvAvgOffRating.isna(),data.careerOffRating,data.mvAvgOffRating)
@@ -689,6 +763,30 @@ class nba:
         data.drop(lgAvgs.columns,axis=1,inplace=True)
         data.fillna(0,inplace=True)
         return data
+
+
+            
+    def scaleData(self,X):
+        d = {**pickle.loads(open('./data/model/scalVals.pkl','rb').read()),**pickle.loads(open('data/model/newFeatsScaled.pkl','rb').read())}
+        for col in d.keys():
+           X[col] = (X[col] - d.get(col).get('mean')) / d.get(col).get('std')
+        return X
+        
+    def updateScaler(self,X,name):
+        ss = StandardScaler()
+        d = {}
+        scaleCols = ['mvAvgThrees', 'mvAvgUsage', 'mvAvgOffRating', 'mvAvgFtPrct','daysBetweenGames', 'gamesInFive',
+               'gamesInThree', 'oppGamesFive', 'oppGamesThree', 'oppDaysLastGame',
+               'mvAvgThrPtPrct', 'seasonUsage', 'seasonOffRating', 'seasonFtPrct',
+               'seasonThrPtPrct', 'careerFtPrct', 'careerThrPtPrct', 'careerUsage',
+               'careerOffRating', 'careerAvgThrees', 'mvAvgOppPace', 'mvAvgOppOpen3',
+               'mvAvgOppWide3', 'mvAvgOppDefRating', 'seasonOppPace', 'seasonOppOpen3',
+               'seasonOppWide3', 'seasonOppDefRating','height','exp','age','daysBetweenGames', 'gamesInFive',]
+        for col in scaleCols:
+            X[col] = ss.fit_transform(X[col].values.reshape(-1,1))
+            d[col] = {'mean':ss.mean_,'std':ss.var_**.5}
+        pickle.dump(d,open('nba/data/model/scalVals{}.pkl'.format(name),'wb'))
+                
     def convertPercentToOdds(self,x):
         '''
         Take a decimal value and convert that into a US betting odd
@@ -706,40 +804,14 @@ class nba:
                 return -9900
             else:
                 return int(1 -(100/(1-x) - 100))
-            
-    def scaleData(self,X):
-        d = pickle.loads(open('./data/model/scalVals.pkl','rb').read())
-        for col in d.keys():
-           X[col] = (X[col] - d.get(col).get('mean')) / d.get(col).get('std')
-        return X
-    def updateScaler(self,X):
-        ss = StandardScaler()
-        d = {}
-        scaleCols = ['mvAvgThrees', 'mvAvgUsage', 'mvAvgOffRating', 'mvAvgFtPrct','daysBetweenGames', 'gamesInFive',
-               'gamesInThree', 'oppGamesFive', 'oppGamesThree', 'oppDaysLastGame',
-               'mvAvgThrPtPrct', 'seasonUsage', 'seasonOffRating', 'seasonFtPrct',
-               'seasonThrPtPrct', 'careerFtPrct', 'careerThrPtPrct', 'careerUsage',
-               'careerOffRating', 'careerAvgThrees', 'mvAvgOppPace', 'mvAvgOppOpen3',
-               'mvAvgOppWide3', 'mvAvgOppDefRating', 'seasonOppPace', 'seasonOppOpen3',
-               'seasonOppWide3', 'seasonOppDefRating','height','exp','age','daysBetweenGames', 'gamesInFive',]
-        for col in scaleCols:
-            X[col] = ss.fit_transform(X[col].values.reshape(-1,1))
-            d[col] = {'mean':ss.mean_,'std':ss.var_**.5}
-        pickle.dump(d,open('data/model/scalVals.pkl','wb'))
-                
-    def kellyCrit(self,prob,odds):
-        if odds > 0:
-            return prob - (1-prob) / (odds / 100)
-        else:
-            return prob - (1-prob) / (100/np.abs(odds))
 
-    def oddsEventId(today,tomorrow):
-        '''ISO Formatted dates for today and tomorrow returns the games that will be played today ids for odds pulls
-        Inputs: isoformatted dates for today and tomorrow
-        Output: list of game ids
-        '''
-        eventURL = 'https://api.the-odds-api.com/v4/sports/basketball_nba/events?apiKey=153deeb03ca7b659e72d18e28219d1a8&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'.format(today,tomorrow)
-        r = requests.get(eventURL)
-        return [d['id'] for d in r.json()]
+class models():
+    def __init__(self):
+        ## each model and its associated sclaer will be a parameter of this class
+        three = pickle.loads(open('nba/data/model/thrModV2.pkl','rb').read())
+        threeScaleers = pickle.loads(open('nba/data/model/scalVals{}.pkl','rb').read())
+        
+    
+    
     
         

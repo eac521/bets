@@ -1,0 +1,5 @@
+##update table information will need for games changing
+nba.conn.execute("UPDATE teamLog SET season = '2024-25' WHERE game_id = '0022400983'")
+nba.conn.execute("UPDATE plyrLogs SET game_date = '2025-01-23' WHERE game_id = '0022400983'")
+nba.conn.execute("UPDATE shotsAllowed SET game_date = '2025-01-23' WHERE game_id = '0022400983'")
+nba.conn.commit()

@@ -19,11 +19,12 @@ ra_fga, paint_fga, mid_fga, (coalesce(lc_fga,0) + coalesce(rc_fga,0)) crn_fga, a
     
 
 --games info
-daysBetweenGames, gamesInFive, gamesInThree, oppGamesFive, OppGamesThree, oppDaysLastGame, home, plyrGameCt, tmGameCt,
+daysBetweenGames, gamesInFive, gamesInThree, oppGamesFive, OppGamesThree, oppDaysLastGame, home, plyrGameCt, tmGameCt, starter,
 CASE WHEN plyrGameCt<= 10 THEN 1 ELSE 0 END as plyrfirst10,
 
 --roling offensive (5 games and season) metrics 
-
+AVG(starter) OVER (PARTITION BY season,player_id
+    ORDER BY plyrGameCt ROWS BETWEEN 11 PRECEDING AND 1 PRECEDING) AS mvAvgstart, 
 AVG(threesMade) OVER (PARTITION BY season,player_id
     ORDER BY plyrGameCt ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) AS mvAvgThrees,
 AVG(usagePercentage) OVER (PARTITION BY season,player_id
@@ -88,8 +89,11 @@ WHERE player_id||season in
 
                     group by player_id,season
 
-                    HAVING AVG(coalesce(lc_fga,0) + coalesce(rc_fga,0) + coalesce(abv_fga,0)) >= 3
-                    and max(plyrGameCt) >= 16
-                    
+                    HAVING (AVG(coalesce(lc_fga,0) + coalesce(rc_fga,0) + coalesce(abv_fga,0)) >= 3
+                    and max(plyrGameCt) >= 16)
+                    --Adding in the below for model update runs
+                    OR (season= '2024-25' and AVG(min) > 15)
+                    OR player_id in (1629645,1641733,1642276,1629626) --dillingham for min and nick smith for cha 1/22 Kal'el ware 1/23
+                                                                    --Bol Bol added 3/2 not sure why is he not showing, avg 3+ threes
                     )
 order by game_date
