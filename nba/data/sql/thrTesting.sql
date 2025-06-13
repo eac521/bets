@@ -93,7 +93,5 @@ WHERE player_id||season in
                     and max(plyrGameCt) >= 16)
                     --Adding in the below for model update runs
                     OR (season= '2024-25' and AVG(min) > 15)
-                    OR player_id in (1629645,1641733,1642276,1629626) --dillingham for min and nick smith for cha 1/22 Kal'el ware 1/23
-                                                                    --Bol Bol added 3/2 not sure why is he not showing, avg 3+ threes
-                    )
+    )
 order by game_date

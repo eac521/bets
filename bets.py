@@ -26,7 +26,7 @@ class betting():
         self.freeApi = dct.get('oddsApi').get('free')
         self.paid = dct.get('oddsApi').get('paid')
         self.nbaEvents = 'https://api.the-odds-api.com/v4/sports/basketball_nba/events?apiKey={}&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'
-        self.nflEvents = elf.events = 'https://api.the-odds-api.com/v4/sports/UPDATE/events?apiKey={}&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'
+        self.nflEvents = self.events = 'https://api.the-odds-api.com/v4/sports/UPDATE/events?apiKey={}&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'
         self.todayISO = (dt.datetime.now()).strftime('%Y-%m-%dT%H:%M:00Z')
         self.tomorISO = (dt.datetime.now() + dt.timedelta(1)).strftime('%Y-%m-%dT%H:%M:00z')
 
@@ -47,8 +47,9 @@ class betting():
             key = self.free
         
         return [d['id'] for d in r.json()],key
-
-    def kellyCrit(self,prob,odds):
+        
+    @staticmethod
+    def kellyCrit(prob,odds):
         '''
         Calculates the kelly criterion to help determin betting size, will give as a percentage of bankroll to use
         Inputs: your probability of the event winning, odds (American) that you will be paid out if the win occurs
@@ -59,7 +60,8 @@ class betting():
         else:
             return prob - (1-prob) / (100/np.abs(odds))
 
-    def convertPercentToOdds(self,x):
+    @staticmethod
+    def convertPercentToOdds(x):
         '''
         Take a decimal value and convert that into a US betting odd
         input: float value
@@ -76,6 +78,53 @@ class betting():
                 return -9900
             else:
                 return int(1 -(100/(1-x) - 100))
+    
+    @staticmethod
+    def h2h(p,fav,udog,spread=.5,ovrLine = 5.5):
+        '''
+        Takes in probabilites for player A (prbA) and player B (prbB) and spread between the two, determines the line for the spread and moneyline
+        This assumes player A is the favored player
+        If over under is enter will also provide the line for that
+        input: probability dataframe, favorite name, underdog name, spread, over/under number
+        output: text showing probility of player A winning (ml), against the spread and over under
+        '''
+        ovr= {}
+        df = p[p.name.isin([fav,udog])].set_index('name')
+        fsp = sum([df.loc[udog][i] * df.loc[fav][np.ceil(i+spread) if i+spread <10 else 10:].sum() for i in range(0,11)])
+        usp = sum([df.loc[fav][i] * df.loc[udog][np.ceil(i-spread) if i-spread>0 else 0:].sum() for i in range(0,11)])
+        fml = sum([df.loc[fav][i] * df.loc[udog][:i+1].sum() for i in range(0,11)])
+        uml = sum([df.loc[udog][i] * df.loc[fav][:i+1].sum() for i in range(0,11)])
+        undr = sum([df.loc[fav][i] * df.loc[udog][x]if x==i else df.loc[fav][i] * df.loc[udog][x] + df.loc[fav][x] * df.loc[udog][i]
+                 for i in np.arange(0,ovrLine) for x in np.arange(0,i+1) if i+x <ovrLine])
+        ovr[fav] = {'spreadLine':nba.convertPercentToOdds(fsp),
+                    'spreadProb':round(fsp,3),
+                    'ml':nba.convertPercentToOdds(fml),
+                    'monyProb':round(fml,3)}
+        ovr[udog] = {'spreadLine':nba.convertPercentToOdds(usp),
+                    'spreadProb':round(usp,3),
+                    'ml':nba.convertPercentToOdds(uml),
+                    'monyProb':round(uml,3)}
+        ovr['over'] = {'underProb':undr,
+                       'underMl':nba.convertPercentToOdds(undr),
+                       'overProb':1-undr,
+                       'overMl':nba.convertPercentToOdds(1-undr),
+                      }
+        return pd.DataFrame(ovr).T
+    
+def bothPlayers(p1,p2,num):
+    print('{} to hit {} is {:.2%}'.format(p1,num,p[p.name.isin([p1])].set_index('name')[np.arange(num,11)].sum(axis=1).values[0]))
+    print('{} to hit {} is {:.2%}'.format(p2,num,p[p.name.isin([p2])].set_index('name')[np.arange(num,11)].sum(axis=1).values[0]))
+    probs = p[p.name.isin([p1,p2])].set_index('name')[np.arange(num,11)].sum(axis=1).prod()
+    odds = nba.convertPercentToOdds(probs)
+    
+    print('Odds: {}, probs: {}'.format(odds,probs))
+
+def eitherPlayer(p1,p2,num):
+    print('{} to hit {} is {:.2%}'.format(p1,num,p[p.name.isin([p1])].set_index('name')[np.arange(num,11)].sum(axis=1).values[0]))
+    print('{} to hit {} is {:.2%}'.format(p2,num,p[p.name.isin([p2])].set_index('name')[np.arange(num,11)].sum(axis=1).values[0]))
+    probs = 1-p[p.name.isin([p1,p2])].set_index('name')[np.arange(0,num)].sum(axis=1).prod()
+    odds = nba.convertPercentToOdds(probs)
+    print('Odds: {}, probs: {}'.format(odds,probs))
 
 
 class nba():
@@ -92,17 +141,18 @@ class nba():
         self.teams = pd.read_sql('select team_id,teamAbrv from teams',self.conn)
         self.curSeasonStart = "2024-10-01"
         
-    def derive_season(self,date):
+    @staticmethod    
+    def derive_season(date):
         '''Get date as a string value and determine the season.
            Inputs: Date as YYYY-MM-DD
            output: Season as YYYY-YY
         '''
         if isinstance(date,str):
             date = pd.to_datetime(date)
-        if d.month <=9:
-            return '{:%Y}-{:%y}'.format(pd.to_datetime(d)-  pd.to_timedelta(365.25,'days'),pd.to_datetime(d))
+        if date.month <=9:
+            return '{:%Y}-{:%y}'.format(pd.to_datetime(date) -  pd.to_timedelta(365,'days'),pd.to_datetime(date))
         else:
-            return '{:%Y}-{:%y}'.format(pd.to_datetime(d),pd.to_datetime(d) + pd.to_timedelta(365.25,'days'))
+            return '{:%Y}-{:%y}'.format(pd.to_datetime(date),pd.to_datetime(date) + pd.to_timedelta(365,'days'))
             
     def get_awards(self,pid):
         '''Get the Most Improved, MVP, DPOY, All-NBA, All-D and All-stars appearances, will get one row per player with each appearance listed
@@ -345,7 +395,7 @@ class nba():
             games['season'] =   ['{}-{}'.format(x[:4],int(x[2:4])+1) if int(x[5:7]) > 9 else '{}-{}'.format(int(x[:4])-1,x[2:4]) for x in games.GAME_DATE]
             return games
             
-    def get_advanced_box(self,game_dates):
+    def get_advanced_box(self,game_dates,qtr=None):
         '''will get the pace, possesions, off/def rating and usage
         Inputs: will need a list of dates
         output: dataframe at the player/game level
@@ -357,7 +407,10 @@ class nba():
             games = games[games.GAME_DATE.isin(game_dates)]   
         df = pd.DataFrame() 
         for gid in tqdm(games.GAME_ID.unique()):
-            advbox = BoxScoreAdvancedV3(gid).get_data_frames()[0].rename(columns={'gameId':'GAME_ID','personId':'PLAYER_ID'})
+            if qtr is None:
+                advbox = BoxScoreAdvancedV3(gid).get_data_frames()[0].rename(columns={'gameId':'GAME_ID','personId':'PLAYER_ID'})
+            else:
+                advbox = BoxScoreAdvancedV3(gid,start_period=qtr,end_period=qtr).get_data_frames()[0].rename(columns={'gameId':'GAME_ID','personId':'PLAYER_ID'})
             advbox = advbox.filter(advcols)
             temp = pd.concat(GameRotation(gid).get_data_frames())
             lst = temp[temp.IN_TIME_REAL==0].PERSON_ID.values.tolist()
@@ -766,7 +819,7 @@ class nba():
 
 
             
-    def scaleData(self,X):
+    def scaleData(self,X,scaler):
         d = {**pickle.loads(open('./data/model/scalVals.pkl','rb').read()),**pickle.loads(open('data/model/newFeatsScaled.pkl','rb').read())}
         for col in d.keys():
            X[col] = (X[col] - d.get(col).get('mean')) / d.get(col).get('std')
@@ -787,23 +840,28 @@ class nba():
             d[col] = {'mean':ss.mean_,'std':ss.var_**.5}
         pickle.dump(d,open('nba/data/model/scalVals{}.pkl'.format(name),'wb'))
                 
-    def convertPercentToOdds(self,x):
-        '''
-        Take a decimal value and convert that into a US betting odd
-        input: float value
-        Output: int 
-        '''
-        if x < .5:
-            if x<=.01:
-                return 9900
-            else:
-                return int(100/x -100)
                 
-        else:
-            if x >= .99:
-                return -9900
-            else:
-                return int(1 -(100/(1-x) - 100))
+    @staticmethod
+    def trade_update(df):
+        '''dataframe with player_id,name, trade_date and new_team.
+        Will update rosters with the new players and print out a statement stating how many rows have been changed for each player
+        Inputs: dataframe
+        Output: None, print statement for update
+        '''
+        date = df.tradeDate.unique()[0]
+        pids = ','.join(df.player_id.unique())
+        nba.cur.execute("DELETE FROM plyrLogs WHERE player_id in ({})  and game_date >= '{}' ".format(pids,date))
+        nba.conn.commit()
+        #update player's schedule with new team
+        lst = df.filter(['player_id','newTeam','tradeDate']).values
+        for l in lst:
+            q ="select '{}' as player_id,team_id,game_date,game_id from teamLog where team_id = '{}' and game_date > '{}'".format(*l)
+            new = pd.read_sql(q,nba.conn)
+            pcols = pd.read_sql('select * from plyrLogs limit 1',nba.conn).columns
+            for col in pcols:
+                if col not in new.columns:
+                    new[col] = None
+            nba.insert_data(new.filter(pcols),'plyrLogs')
 
 class models():
     def __init__(self):

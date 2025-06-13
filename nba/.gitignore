@@ -1,0 +1,9 @@
+#files
+config.json
+
+#paths
+data/box
+data/csv
+data/files
+data/pbp
+data/pickle

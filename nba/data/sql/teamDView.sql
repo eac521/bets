@@ -6,7 +6,14 @@ CREATE VIEW team_def AS
     CAST(mid_fga + ra_fga + paint_fga AS FLOAT) as twos_fga
     FROM shotsAllowed
 )
-
+WITH OppStats AS (
+    SELECT team_id, game_id, tm_to, 
+    FROM teamLog
+    LEFT JOIN (
+    SELECT team_id,game_id, sum(
+    )
+    )
+    
 WITH daysSince AS (
     SELECT player_id, game_date,
     julianday(lag(game_date,1) OVER (PARTITION BY player_id,season ORDER BY game_date)) as game1_date,
@@ -19,7 +26,7 @@ WITH daysSince AS (
 select 
 season, substr(sht.game_date,6,2) as month, teamAbrv as team, rank() OVER(PARTITION BY team_id,season ORDER BY sht.game_date) game_number,
 --last games played
-julianday(sht.game_date) - julianday(lag(sht.game_date,1) OVER (PARTITION BY team_id,season ORDER BY sht.game_date)) - 1 daysBetweenGames,
+julianday(sht.game_date) - game1_date - 1 daysBetweenGames,
 (
 case when julianday(log.game_date) - game5_date < 5 then 1 else 0 end +
 case when julianday(log.game_date) - game4_date < 5 then 1 else 0 end + 

@@ -23,7 +23,7 @@ height, SUBSTR(season,1,4) - draft_year exp, (JULIANDAY(substr(season,1,4) || '-
 home,plogs.*,
  
 --last games played
-julianday(game_date) - julianday(lag(game_date,1) OVER (PARTITION BY player_id,season ORDER BY game_date)) - 1 daysBetweenGames,
+julianday(game_date) - game1_date - 1 daysBetweenGames,
 (
 case when julianday(game_date) - game1_date < 5 then 1 else 0 end +
 case when julianday(game_date) - game2_date < 5 then 1 else 0 end + 
