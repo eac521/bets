@@ -1,0 +1,24 @@
+Metadata-Version: 2.1
+Name: nba-betting
+Version: 0.1.0
+Summary: Leveraging nba_api to pull data, storing in dropbox and using models for predictions
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: pandas>=1.3.0
+Requires-Dist: numpy>=1.20.0
+Requires-Dist: scikit-learn>=1.0.0
+Requires-Dist: requests>=2.25.0
+Requires-Dist: nba-api>=1.1.0
+Requires-Dist: tqdm>=4.60.0
+Provides-Extra: nba
+Requires-Dist: nba-api>=1.1.0; extra == "nba"
+Provides-Extra: mlb
+Requires-Dist: pybaseball>=2.0.0; extra == "mlb"
+Provides-Extra: nfl
+Requires-Dist: nfl-data-py>=0.1.0; extra == "nfl"
+Provides-Extra: dev
+Requires-Dist: jupyter>=1.0.0; extra == "dev"
+Requires-Dist: matplotlib>=3.3.0; extra == "dev"
+Requires-Dist: seaborn>=0.11.0; extra == "dev"
+
+NBA Betting Analysis and Prediction System
