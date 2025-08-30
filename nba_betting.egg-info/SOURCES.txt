@@ -1,10 +1,13 @@
 README.md
 setup.py
+betting/__init__.py
+betting/funcs.py
 nba/NBAbase.py
 nba/NBAdata.py
 nba/NBAetl.py
 nba/NBAmodels.py
 nba/__init__.py
+nba/bets.py
 nba_betting.egg-info/PKG-INFO
 nba_betting.egg-info/SOURCES.txt
 nba_betting.egg-info/dependency_links.txt

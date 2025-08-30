@@ -20,7 +20,10 @@ RANK() OVER(PARTITION BY player_id,season ORDER BY game_date) plyrGameCt,
 --player demo information
 height, SUBSTR(season,1,4) - draft_year exp, (JULIANDAY(substr(season,1,4) || '-10-15') - JULIANDAY(birthday)) / 365.25 age, 
 --game information if home and opponent shooting allowed
-home,plogs.*,
+--first quarter player info
+home,plogs.*,q1.min as minInFirst,
+coalesce(q1.lc_fgm,0) + coalesce(q1.rc_fgm,0) as crnFgaFirst,
+coalesce(q1.abv_fgm,0) as abvFgaFirst,
  
 --last games played
 julianday(game_date) - game1_date - 1 daysBetweenGames,
@@ -38,6 +41,10 @@ case when julianday(game_date) - game1_date < 3 then 1 else 0 end) + 1 gamesInTh
 
 --threes made
 coalesce(lc_fgm,0) + coalesce(rc_fgm,0) + coalesce(abv_fgm,0) as threesMade,
+SUM(coalesce(lc_fga,1) )OVER (PARTITION BY team_id, seaon ORDER by game_date) + 
+SUM(coalesce(rc_fga,1) )OVER (PARTITION BY team_id, seaon ORDER by game_date) + 
+SUM(coalesce(abv_fga,1) )OVER (PARTITION BY team_id, seaon ORDER by game_date) as teamThreesTaken,
+(coalesce(lc_fga,1) + coalesce(rc_fga,1) + coalesce(abv_fga,1)) as threesAtt,
 
 --percentages coalesce as 1 on denom only to avoid errors
 (coalesce(lc_fgm,0) + coalesce(rc_fgm,0) + coalesce(abv_fgm,0)) / (coalesce(lc_fga,1) + coalesce(rc_fga,1) + coalesce(abv_fga,1)) thrPtPrct,
@@ -53,7 +60,7 @@ pace - teamPace as marginPace,
 
 
 --opponent information defined in subquery below
-opp.* 
+opp.* , julianday(game_date) - game1_date - 1  - oppDaysLastGame as netRest
     
     
 from plyrLogs plogs
@@ -63,7 +70,8 @@ LEFT JOIN
     from teamLog) tm USING (team_id,game_id) 
 LEFT JOIN teams tms USING (team_id)
 LEFT JOIN daysSince ds USING (player_id,game_date)
-LEFT join players ply USING (player_id)
+LEFT JOIN players ply USING (player_id)
+LEFT JOIN plyrQ1Logs q1 USING (player_id,game_id)
 LEFT JOIN 
 --get opponent shot profile
     (SELECT team_id as opp_id,game_id ,ra_fga as ra_fgallowed, paint_fga as paint_fgallowed, mid_fga as mid_fgallowed, lc_fga as lc_fgallowed, rc_fga as rc_fgallowed, abv_fga as abv_fgallowed, open_fg3a, wide_fg3a, open_fg2a, wide_fg2a, games_in_five as oppGamesFive, games_in_three as oppGamesThree, daysBetweenGames as oppDaysLastGame,pace as oppPace,open3_rate, wide3_rate, open2_rate, wide2_rate,count_inactive,

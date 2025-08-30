@@ -1,11 +1,12 @@
 import sqlite3
-import pandas
+import pandas as pd
+from matplotlib.colors import LinearSegmentedColormap
 class base():
 
 
     def __init__(self):
-        self.db = './data/database/nba.db'
-        self.newDB = '~/Dropbox/backups/database/nba.db'
+        #self.db = 'data/database/nba.db'
+        self.db = '/Users/ericcoxon/Dropbox/backups/database/nba.db'
         self.conn = sqlite3.connect(self.db)
         self.cur = self.conn.cursor()
         self.showTables = pd.read_sql("SELECT * FROM sqlite_master WHERE type in ('table','view');",self.conn)
@@ -14,7 +15,16 @@ class base():
 }
         #self.players = pd.read_sql('select * from roster_view')
         self.teams = pd.read_sql('select team_id,teamAbrv from teams',self.conn)
-        
+        self.vlog = self.createVlog()
+        self.vlog_r = self.createVlog(reverse=True)
+
+
+    def createVlog(self,reverse=False):
+        colors = ['#013220', '#2d8f59', '#7bc27b', '#c8e6c9', '#ffffff',
+              '#ffcdd2', '#f48fb1', '#e91e63', '#ad1457', '#4a0e2b']
+        Vlog = LinearSegmentedColormap.from_list('green_vlag', colors[::-1] if reverse else colors, N=256)
+        return Vlog
+
         
     def derive_season(self,date):
         '''Get date as a string value and determine the season.
@@ -22,13 +32,13 @@ class base():
            output: Season as YYYY-YY
         '''
         if isinstance(date,str):
-            date = pd.to_datetime(date)
+            d = pd.to_datetime(date)
         if d.month <=9:
             return '{:%Y}-{:%y}'.format(pd.to_datetime(d)-  pd.to_timedelta(365.25,'days'),pd.to_datetime(d))
         else:
             return '{:%Y}-{:%y}'.format(pd.to_datetime(d),pd.to_datetime(d) + pd.to_timedelta(365.25,'days'))
     
-    def insert_data(self,data,table):
+    def insert_data(self,data,table,sort=False):
         '''Simply writes the data insto the table, needs to be in the correct order
         Inputs: pandas DataFrame, string of table name
         ouput: Response that table has been uploaded
@@ -38,8 +48,12 @@ class base():
         # '''.format(table),self.conn).name.values
         rows = data.shape[0]
         v = '?' + ',?' * (data.shape[1] -1)
-        self.cur.executemany('''insert into {t} values ({v})'''.format(t=table,v=v),data.values.tolist())
+        if sort:
+            ord = [col[0] for col in self.cur.execute('select * from {} limit 1'.format(table)).description]
+            self.cur.executemany('''insert into {t} values ({v})'''.format(t=table,v=v),data.filter(ord).values.tolist())
+        else:
+            self.cur.executemany('''insert into {t} values ({v})'''.format(t=table, v=v),
+                                 data.values.tolist())
         self.conn.commit()
-        self.conn.close()
         return print('{} has been updated with {:,} rows'.format(table,rows))
         

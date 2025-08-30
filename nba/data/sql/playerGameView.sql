@@ -3,14 +3,21 @@
 CREATE VIEW pgames 
     AS
 WITH daysSince AS (
-    SELECT player_id, game_date,
-    julianday(lag(game_date,1) OVER (PARTITION BY player_id,season ORDER BY game_date)) as game1_date,
-    julianday(lag(game_date,2) OVER (PARTITION BY player_id,season ORDER BY game_date)) as game2_date,
-    julianday(lag(game_date,3) OVER (PARTITION BY player_id,season ORDER BY game_date)) as game3_date,
-    julianday(lag(game_date,4) OVER (PARTITION BY player_id,season ORDER BY game_date)) as game4_date,
-    julianday(lag(game_date,5) OVER (PARTITION BY player_id,season ORDER BY game_date)) as game5_date
+    SELECT player_id,game_id,
+    julianday(lag(game_date,1) OVER (PARTITION BY player_id ORDER BY game_date)) as game1_date,
+    julianday(lag(game_date,2) OVER (PARTITION BY player_id ORDER BY game_date)) as game2_date,
+    julianday(lag(game_date,3) OVER (PARTITION BY player_id ORDER BY game_date)) as game3_date,
+    julianday(lag(game_date,4) OVER (PARTITION BY player_id ORDER BY game_date)) as game4_date,
+    julianday(lag(game_date,5) OVER (PARTITION BY player_id ORDER BY game_date)) as game5_date
     FROM plyrLogs
-    )
+    ),
+q1 AS (SELECT player_id,game_id,
+min as minFirst,
+coalesce(lc_fga,0) + coalesce(rc_fga,0) as crnFgaFirst,
+coalesce(abv_fga,0) as abvFgaFirst
+
+FROM plyrQ1Logs
+)
 SELECT 
 --identifiying information
 name, teamAbrv as team,season,tmGameCt,
@@ -20,6 +27,8 @@ RANK() OVER(PARTITION BY player_id,season ORDER BY game_date) plyrGameCt,
 --player demo information
 height, SUBSTR(season,1,4) - draft_year exp, (JULIANDAY(substr(season,1,4) || '-10-15') - JULIANDAY(birthday)) / 365.25 age, 
 --game information if home and opponent shooting allowed
+--first quarter player info
+minFirst,crnFgaFirst,abvFgaFirst,
 home,plogs.*,
  
 --last games played
@@ -38,6 +47,10 @@ case when julianday(game_date) - game1_date < 3 then 1 else 0 end) + 1 gamesInTh
 
 --threes made
 coalesce(lc_fgm,0) + coalesce(rc_fgm,0) + coalesce(abv_fgm,0) as threesMade,
+SUM(coalesce(lc_fga,1) )OVER (PARTITION BY team_id, season ORDER by game_date) +
+SUM(coalesce(rc_fga,1) )OVER (PARTITION BY team_id, season ORDER by game_date) +
+SUM(coalesce(abv_fga,1) )OVER (PARTITION BY team_id, season ORDER by game_date) as teamThreesTaken,
+(coalesce(lc_fga,1) + coalesce(rc_fga,1) + coalesce(abv_fga,1)) as threesAtt,
 
 --percentages coalesce as 1 on denom only to avoid errors
 (coalesce(lc_fgm,0) + coalesce(rc_fgm,0) + coalesce(abv_fgm,0)) / (coalesce(lc_fga,1) + coalesce(rc_fga,1) + coalesce(abv_fga,1)) thrPtPrct,
@@ -53,7 +66,7 @@ pace - teamPace as marginPace,
 
 
 --opponent information defined in subquery below
-opp.* 
+opp.* , julianday(game_date) - game1_date - 1  - oppDaysLastGame as netRest
     
     
 from plyrLogs plogs
@@ -62,11 +75,17 @@ LEFT JOIN
     RANK() OVER(PARTITION BY team_id,season ORDER BY game_date) tmGameCt 
     from teamLog) tm USING (team_id,game_id) 
 LEFT JOIN teams tms USING (team_id)
-LEFT JOIN daysSince ds USING (player_id,game_date)
-LEFT join players ply USING (player_id)
+LEFT JOIN daysSince ds USING (player_id,game_id)
+LEFT JOIN players ply USING (player_id)
+LEFT JOIN q1 USING (player_id,game_id)
 LEFT JOIN 
 --get opponent shot profile
-    (SELECT team_id as opp_id,game_id ,ra_fga as ra_fgallowed, paint_fga as paint_fgallowed, mid_fga as mid_fgallowed, lc_fga as lc_fgallowed, rc_fga as rc_fgallowed, abv_fga as abv_fgallowed, open_fg3a, wide_fg3a, open_fg2a, wide_fg2a, games_in_five as oppGamesFive, games_in_three as oppGamesThree, daysBetweenGames as oppDaysLastGame,pace as oppPace,open3_rate, wide3_rate, open2_rate, wide2_rate,count_inactive,
+    (SELECT team_id as opp_id,game_id, ra_fga as ra_fgallowed, paint_fga as paint_fgallowed,
+     mid_fga as mid_fgallowed, lc_fga as lc_fgallowed, rc_fga as rc_fgallowed,
+     abv_fga as abv_fgallowed, open_fg3a, wide_fg3a, open_fg2a, wide_fg2a,
+     games_in_five as oppGamesFive, games_in_three as oppGamesThree,
+     daysBetweenGames as oppDaysLastGame,pace as oppPace,open3_rate, wide3_rate, open2_rate,
+     wide2_rate,count_inactive,
 
 --to be used to help replace missing values, will be deleted
     --moving/season averages
