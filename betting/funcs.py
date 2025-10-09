@@ -7,13 +7,13 @@ Creating general betting functions that will be shared between NFL and NBA
 class odds():
     
     def __init__(self,configPath='config.json'):
-        #self.dct = json.loads(open(configPath,'r').read())
-        #self.freeApi = dct.get('oddsApi').get('free')
-        #self.paid = dct.get('oddsApi').get('paid')
-        #self.nbaEvents = 'https://api.the-odds-api.com/v4/sports/basketball_nba/events?apiKey={}&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'
-        #self.nflEvents = self.events = 'https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events?apiKey={}&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'
-        #self.todayISO = (dt.datetime.now()).strftime('%Y-%m-%dT%H:%M:00Z')
-        #self.tomorISO = (dt.datetime.now() + dt.timedelta(1)).strftime('%Y-%m-%dT%H:%M:00z')
+        self.dct = json.loads(open(configPath,'r').read())
+        self.freeApi = dct.get('oddsApi').get('free')
+        self.paid = dct.get('oddsApi').get('paid')
+        self.nbaEvents = 'https://api.the-odds-api.com/v4/sports/basketball_nba/events?apiKey={}&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'
+        self.nflEvents = self.events = 'https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events?apiKey={}&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'
+        self.todayISO = (dt.datetime.now()).strftime('%Y-%m-%dT%H:%M:00Z')
+        self.tomorISO = (dt.datetime.now() + dt.timedelta(1)).strftime('%Y-%m-%dT%H:%M:00z')
 
     def oddsData(self, eventURL):
         '''
@@ -81,7 +81,7 @@ class odds():
         Input: Integer
         Output: float
         '''
-        return 100 if x > 0 else x / (x+100)
+        return np.abs(x) / (np.abs(x)+100) if x < 0 else 100 / (x+100)
     
     @staticmethod
     def zeroSumOdds(df):

@@ -181,7 +181,7 @@ class etl(base):
 			'DREB','DREB_CONTEST','DREB_CHANCES','DREB_CHANCE_DEFER','AVG_DREB_DIST']
 		rbs = LeagueDashPtStats(pt_measure_type='Rebounding',player_or_team='Player',
 			date_from_nullable = minDate,
-			date_to_nullable = maxDate,
+			date_to_nullable = maxDate,period_nullable = qtr
 		).get_data_frames()[0][rbsCols]
 		final = rbs.merge(games ,how='left',on=['TEAM_ID'])
 		
@@ -283,7 +283,6 @@ class etl(base):
 		Input(s): list of game dates
 		Output  : dataframe at the the level of each team game, will have columns for each area for each dribble type 0,1,2,3-6 and 7+ dribbles 
 		'''
-		
 		drib = ['0 Dribbles','1 Dribble','2 Dribbles','3-6 Dribbles','7+ Dribbles']
 		final = pd.DataFrame()
 		for ct,date in enumerate(tqdm(game_dates)):
@@ -295,15 +294,19 @@ class etl(base):
 					date_to_nullable = date,
 					season=season,
 					dribble_range_nullable=dribbleCount).get_data_frames()[0]
-				if addSleep:
-					time.sleep(np.random.randint(2,8))
+				time.sleep(np.random.randint(2,8))
 				df = drbShots.filter([col for col in drbShots.columns if re.search('[2-3][A|M]$|ID$',col)!=None])
 				df.columns = ['{}_{}'.format(dribbleCount.replace(' ','_'),col) if re.search('ID$',col)==None else col for col in df.columns]
 				drb = pd.concat([drb,df])
 				drb['GAME_DATE'] = date
 			drb = drb.groupby(['PLAYER_ID','GAME_DATE','PLAYER_LAST_TEAM_ID']).sum().reset_index()
 			final = pd.concat([final,drb])
+			if np.random.randint(0,100) % 6 == 0:
+				time.sleep(np.random.randint(25,95))
 		return final
+
+
+
 
 	def get_player_shot_spots(self,game_dates,qtr=0):
 		'''Expected Input: list of Dates of the game being played

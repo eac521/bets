@@ -16,16 +16,18 @@ height, exp, age,
 
 --shot locations, will have percentiles done in pandas
 ra_fga, paint_fga, mid_fga, (COALESCE(lc_fga,0) + COALESCE(rc_fga,0)) crn_fga, abv_fga,
-minFirst, crnFgaFirst, abvFgaFirst,
+--minFirst, crnFgaFirst, abvFgaFirst,
 
 --games info
 CASE WHEN daysBetweenGames > 9 THEN 10 ELSE daysBetweenGames END AS daysBetweenGames,
 gamesInFive, gamesInThree, oppGamesFive, OppGamesThree,
 CASE WHEN oppDaysLastGame > 9 THEN 10 ELSE oppDaysLastGame END AS oppDaysLastGame,
+CASE WHEN daysBetweenGames > 9  THEN 10 ELSE daysBetweenGames END -
+CASE WHEN oppDaysLastGame > 9 THEN 10 ELSE oppDaysLastGame END AS netRest,
+
  home, tmGameCt, starter,
 CASE WHEN plyrGameCt<= 10 THEN 1 ELSE 0 END as plyrFirst10,
-netRest,
---roling offensive (5 games and season) metrics
+--rolling offensive (5 games and season) metrics
 AVG(starter) OVER (PARTITION BY season,player_id
     ORDER BY plyrGameCt ROWS BETWEEN 11 PRECEDING AND 1 PRECEDING) AS mvAvgstart, 
 AVG(threesMade) OVER (PARTITION BY season,player_id
@@ -34,6 +36,11 @@ AVG(usagePercentage) OVER (PARTITION BY season,player_id
     ORDER BY plyrGameCt ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) AS mvAvgUsage,
 AVG(offensiveRating) OVER (PARTITION BY season,player_id
     ORDER BY plyrGameCt ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) AS mvAvgOffRating,
+AVG(marginOffRating) OVER (PARTITION BY season,player_id
+    ORDER BY plyrGameCt ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) as mvAvgMarginOffRating,
+AVG(min) OVER (PARTITION BY season,player_id
+    ORDER BY plyrGameCt ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) as mvAvgMinutes,
+
     
 SUM(ftm) OVER (PARTITION BY season,player_id
     ORDER BY plyrGameCt ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) * 1.0
@@ -89,6 +96,7 @@ FROM pgames
 WHERE player_id||season in 
                     (SELECT player_id||season
                     FROM pgames 
+                    WHERE game_date > '2021-10-01'
 
                     group by player_id||season
 

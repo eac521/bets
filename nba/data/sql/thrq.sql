@@ -20,7 +20,7 @@ ra_fga, paint_fga, mid_fga, (coalesce(lc_fga,0) + coalesce(rc_fga,0)) crn_fga, a
 --games info
 daysBetweenGames, gamesInFive, gamesInThree, oppGamesFive, OppGamesThree, oppDaysLastGame, home, plyrGameCt, tmGameCt,
 CASE WHEN plyrGameCt<= 10 THEN 1 ELSE 0 END as plyrfirst10,
-
+daysBetweenGames - oppDaysLastGame as netRest,
 --roling offensive (5 games and season) metrics 
 
 AVG(threesMade) OVER (PARTITION BY season,player_id
@@ -29,6 +29,8 @@ AVG(usagePercentage) OVER (PARTITION BY season,player_id
     ORDER BY plyrGameCt ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) AS mvAvgUsage,
 AVG(offensiveRating) OVER (PARTITION BY season,player_id
     ORDER BY plyrGameCt ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) AS mvAvgOffRating,
+AVG(marginOffRating) OVER (PARTITION BY season,player_id
+    ORDER BY plyrGameCt ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) as mvAvgMarginOffRating,
     
 SUM(ftm) OVER (PARTITION BY season,player_id
     ORDER BY plyrGameCt ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) * 1.0

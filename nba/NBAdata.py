@@ -79,32 +79,46 @@ class data(base):
                     new[col] = None
             self.insert_data(new.filter(pcols), 'plyrLogs')
 
-    def threes_pipe(self,df):
+    def threes_pipe(self, df):
         '''Will generate the data needed to generate predictions for threes
-		Inputs: str for game date formatted as YYYY-MM-DD
-		Output: DataFrame of your X values
-		'''
-        #team defense needs to be done here for all moving averages/coeff vars as it moves to player level after this.
+        Inputs: str for game date formatted as YYYY-MM-DD
+        Output: DataFrame of your X values
+        '''
+        crnBin = pd.read_pickle('../nba/data/parquet/cornerBin.pickle')
+        # team defense needs to be done here for all moving averages/coeff vars as it moves to player level after this.
         tmsa = self.rolling_team_sa()
-        tmsa = tmsa.join(data.weighted_moving_avg(tmsa, 5, 15, 'crn_fgallowed', 'opp_id'))
-        tmsa = tmsa.join(data.weighted_moving_avg(tmsa,5,15,'abv_fgallowed','opp_id'))
-        tmsa = tmsa.join(data.rolling_coeffecient_var(tmsa,5,15,'wide_fg3allowed','opp_id'))
+        tmsa = tmsa.join(self.weighted_moving_avg(tmsa, 5, 15, 'crn_fgallowed', 'opp_id'))
+        tmsa = tmsa.join(self.weighted_moving_avg(tmsa, 5, 15, 'abv_fgallowed', 'opp_id'))
+        tmsa = tmsa.join(self.rolling_coeffecient_var(tmsa, 5, 15, 'wide_fg3allowed', 'opp_id'))
         plsh = self.rolling_player_shot(df)
         final = df.merge(plsh, how='left', on=['player_id', 'game_date']).merge(tmsa, how='left',
-                                                                                 on=['game_date', 'opp_id'])
+                                                                                on=['game_date', 'opp_id'])
         final['abv_kurtSkew'] = final.abv_fgakurt * final.abv_fgaskew
         final['crn_kurtSkew'] = final.crn_fgakurt * final.crn_fgaskew
-        final = final.join(data.weighted_moving_avg(final, 5, 15, 'crn_fga', 'player_id'))
-        final = final.join(data.weighted_moving_avg(final, 5, 15, 'abv_fga', 'player_id'))
-        final = final.join(data.rolling_coeffecient_var(final,5,15,'minFirst','player_id'))
-        final = final.join(data.rolling_coeffecient_var(final, 5, 15, 'abvFgaFirst', 'player_id'))
-        final = final.join(data.rolling_coeffecient_var(final, 5, 15, 'crnFgaFirst', 'player_id'))
+        final = final.join(self.weighted_moving_avg(final, 5, 15, 'crn_fga', 'player_id'))
+        final = final.join(self.weighted_moving_avg(final, 5, 15, 'abv_fga', 'player_id'))
+        final = final.join(self.weighted_moving_avg(final, 5, 15, 'abvFgaFirst', 'player_id'))
+        final = final.join(self.weighted_moving_avg(final, 5, 15, 'crnFgaFirst', 'player_id'))
+        final = final.join(self.weighted_moving_avg(final, 5, 15, 'minFirst', 'player_id'))
+        final = final.join(self.rolling_coeffecient_var(final, 5, 15, 'minFirst', 'player_id'))
+        final = final.join(self.rolling_coeffecient_var(final, 5, 15, 'abvFgaFirst', 'player_id'))
+        final = final.join(self.rolling_coeffecient_var(final, 5, 15, 'crnFgaFirst', 'player_id'))
+        final = final.join(self.weighted_moving_avg(final, 5, 15, 'threesMade', 'player_id'))
+        final['cornerRatio'] = crnBin.transform(final.abv_fgaMv / (final.abv_fgaMv + final.crn_fgaMv))
+        final['crn_interaction'] = final.crn_fgaMv * final.crn_fgallowed
+        final['abv_interaction'] = final.abv_fgaMv * final.abv_fgallowed
+        final['wide_interaction'] = final.mvAvgOppWide3 * final.mvAvgThrPtPrct
+
+
+        final['usage_interaction'] = final.mvAvgUsage * final.mvAvgOppPace
 
         # dropping the fga columns as they have been used for shots and shots allowed
-        final.drop(['ra_fga', 'mid_fga', 'paint_fga'], axis=1, inplace=True)
+        dropCols = ['ra_fga', 'mid_fga', 'paint_fga','opp_id', 'crn_fga','abv_fga','minFirst','crnFgaFirst','abvFgaFirst']
+        final.drop(dropCols, axis=1, inplace=True)
         # fill na for first game/opp game of season, adding in a 9 as this is similar to the all-star break
         final.daysBetweenGames.fillna(9, inplace=True)
         final.oppDaysLastGame.fillna(9, inplace=True)
+
         # final = final[final.game_date==date]
         return final
 
@@ -123,19 +137,28 @@ class data(base):
                     coalesce(lc_fga, 0) + coalesce(rc_fga, 0) as crn_fgallowed, \
                     abv_fga                                   as abv_fgallowed,
                      wide_fg3a                                as wide_fg3allowed,\
+                     RAAllowedVsAvg                           as ra_residualsAllowed, 
+                     PaintAllowedVsAvg                        as paint_residualsAllowed, 
+                     MidAllowedVsAvg                          as mid_residualsAllowed, 
+                     ThreesAllowedVsAvg                       as threes_residualsAllowed,
                     season \
              from team_def \
              order by opp_id, game_date \
 			 '''
         df = pd.read_sql(sa, self.conn)
         # quants = ([1/6,1/3,.5,2/3,5/6,1],['st','nd','rd','rth','fth','xth'])
-        shots = [col for col in df.columns if re.search('_fgallowed$', col) != None]
-        pdf = df[['opp_id', 'game_date','wide_fg3allowed','crn_fgallowed','abv_fgallowed']]
+        shots = [col for col in df.columns if re.search('_fgallowed$|residualsAllowed$', col) != None]
+        pdf = df[['opp_id', 'game_date','wide_fg3allowed','crn_fgallowed','abv_fgallowed','ra_residualsAllowed','paint_residualsAllowed',
+         'mid_residualsAllowed','threes_residualsAllowed']]
         for col in shots:
             skew = df.groupby(['opp_id'])[col].rolling(15, closed='left', min_periods=5).skew()
             kurt = df.groupby(['opp_id'])[col].rolling(15, closed='left', min_periods=5).kurt()
             pdf = pdf.join(skew.reset_index(name='{}skew'.format(col)).set_index('level_1').drop('opp_id', axis=1))
             pdf = pdf.join(kurt.reset_index(name='{}kurt'.format(col)).set_index('level_1').drop('opp_id', axis=1))
+            if col.find('residual')>-1:
+                pdf = pdf.join(self.weighted_moving_avg(pdf, 5, 15, col, 'opp_id'))
+            else:
+                pass
 
         return pdf
 
@@ -197,13 +220,45 @@ class data(base):
                                                    win_type='exponential').mean())
         return coefVar.reset_index(name='{}coefVar'.format(col)).set_index('level_1').drop([grping], axis=1)
 
-    @staticmethod
-    def stand_scaler(X,scaler=None):
+
+
+    def clean_na(self, df):
         '''
-        Will do a standard scaling on your data based on a dictionary provided that has the features, mean and std for each feature.
-        Inputs: DataFrame and dictionary
-        Output: New scaled DataFrame
+        specifically to replace nans in the threes dataset
+        Inputs: the completed Threes data set with distibuition information
+        Ouput: dataframe removing nans
         '''
-        for col in scaler.keys():
-           X[col] = (X[col] - scaler.get(col).get('center')) / scaler.get(col).get('scale')
-        return X
+        lgAvgs = pd.read_sql('''select season,
+                                       sum(open_fg3a) * 1.0 / (sum(abv_fga) + sum(lc_fga) + sum(rc_fga)) open_fg3aLgSeason,
+                                       sum(wide_fg3a) * 1.0 / (sum(abv_fga) + sum(lc_fga) + sum(rc_fga)) wide_fg3aLgSeason,
+                                       avg(pace)     as                                                  paceLgSeason,
+                                       avg(def_rate) as                                                  def_rateLgSeason
+                                from team_def
+                                group by season
+                                HAVING season is not Null
+                             ''', self.conn).set_index('season').reset_index().shift()
+
+        df.loc[:,'mvAvgThrees'] = df['mvAvgThrees'].fillna(df['careerAvgThrees'])
+        df.loc[:,'mvAvgUsage'] = df['mvAvgUsage'].fillna(df['careerUsage'])
+        df.loc[:,'mvAvgOffRating'] = df['mvAvgOffRating'].fillna(df['careerOffRating'])
+        df.loc[:,'mvAvgFtPrct'] = df['mvAvgFtPrct'].fillna(df['careerFtPrct'])
+        df.loc[:,'mvAvgThrPtPrct'] = df['mvAvgThrPtPrct'].fillna(df['careerThrPtPrct'])
+        df.loc[:,'seasonUsage'] = df['seasonUsage'].fillna(df['careerUsage'])
+        df.loc[:,'seasonOffRating'] = df['seasonOffRating'].fillna(df['careerOffRating'])
+        df.loc[:,'seasonFtPrct'] = df['seasonFtPrct'].fillna(df['careerFtPrct'])
+        df.loc[:,'seasonThrPtPrct'] = df['seasonThrPtPrct'].fillna(df['careerThrPtPrct'])
+        idx = df.index
+
+        df = df.merge(lgAvgs, how='left', on=['season'])
+        df.index = idx
+        df['mvAvgOppPace'] = df['mvAvgOppPace'].fillna(df['paceLgSeason'])
+        df['seasonOppPace'] = df['seasonOppPace'].fillna(df['paceLgSeason'])
+        df['mvAvgOppOpen3'] = df['mvAvgOppOpen3'].fillna(df['open_fg3aLgSeason'])
+        df['seasonOppOpen3'] = df['seasonOppOpen3'].fillna(df['open_fg3aLgSeason'])
+        df['seasonOppWide3'] = df['seasonOppWide3'].fillna(df['wide_fg3aLgSeason'])
+        df['mvAvgOppWide3'] = df['mvAvgOppWide3'].fillna(df['wide_fg3aLgSeason'])
+        df['mvAvgOppDefRating'] = df['mvAvgOppDefRating'].fillna(df['def_rateLgSeason'])
+        df['seasonOppDefRating'] = df['seasonOppDefRating'].fillna(df['def_rateLgSeason'])
+        df.drop([col for col in lgAvgs.columns if col.find('LgSeason')>-1], axis=1, inplace=True)
+        df.fillna(0, inplace=True)
+        return df
