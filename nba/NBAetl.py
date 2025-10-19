@@ -221,8 +221,9 @@ class etl(base):
 		Inputs: Season as YYYY-YY
 		Output: Dataframe with columns game_date, game_id, team_id,home
 		'''
-		startDate = '{}-10-21'.format(season[:4])
-		r = requests.get("http://data.nba.com/data/10s/v2015/json/mobile_teams/nba/{}/league/00_full_schedule.json".format(season))
+		sDate = season[:4]
+		startDate = '{}-10-20'.format(sDate)
+		r = requests.get("http://data.nba.com/data/10s/v2015/json/mobile_teams/nba/{}/league/00_full_schedule.json".format(sDate))
 		h = [[v['gdte'], v['gid'],str(v['h']['tid']),1] for k in r.json()['lscd'] for v in k['mscd']['g'] if v['gdte']>startDate]
 		a = [[v['gdte'], v['gid'],str(v['v']['tid']),0] for k in r.json()['lscd'] for v in k['mscd']['g'] if v['gdte']>startDate]
 		df = pd.DataFrame(data=h+a, columns = ['game_date','game_id','team_id','home'])
@@ -550,3 +551,14 @@ class etl(base):
 		df = pd.DataFrame([x for y in l for x in y],columns = ['GAME_ID','PLAYER_ID','team_first','game_first'])
 		print('\tcompleted at {}'.format(time.strftime('%H:%M')))
 		return df
+	def derive_opp_data_table(self):
+		self.cur.execute(open('../nba/data/sql/derive_opp_table.sql','r').read())
+		self.cur.execute("CREATE INDEX IF NOT EXISTS idx_opp_data ON opp_data(game_id, opp_id)")
+		self.conn.commit()
+		print('opp_table derived')
+
+	def refresh_opp_data(self):
+		"""Rebuild opp_data from source tables"""
+		print("Refreshing opp_data...")
+		self.cur.execute("DROP TABLE IF EXISTS opp_data")
+		self.derive_opp_data_table()

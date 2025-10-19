@@ -1,5 +1,6 @@
 -- with teamInfo as (
 --     SELECT sum(abv_fga) as teamAbvFga, sum(crn_fga) as teamCrnFga, sum(ra_fga) as teamRaFga, sum(mid_fga) as teamMidFga, sum(paint_fga) as teamPaintFga, 
+
 CREATE VIEW pgames 
     AS
 WITH daysSince AS (
@@ -18,7 +19,8 @@ name, teamAbrv as team,season,tmGameCt,
 RANK() OVER(PARTITION BY player_id,season ORDER BY game_date) plyrGameCt,
 
 --player demo information
-height, SUBSTR(season,1,4) - draft_year exp, (JULIANDAY(substr(season,1,4) || '-10-15') - JULIANDAY(birthday)) / 365.25 age, 
+height, SUBSTR(season,1,4) - draft_year exp, 
+--(JULIANDAY(substr(season,1,4) || '-10-15') - JULIANDAY(birthday)) / 365.25 age, 
 --game information if home and opponent shooting allowed
 --first quarter player info
 --minFirst,crnFgaFirst,abvFgaFirst,
@@ -60,7 +62,7 @@ pace - teamPace as marginPace,
 
 
 --opponent information defined in subquery below
-opp.*
+opp_data.*
     
     
 from plyrLogs plogs
@@ -72,48 +74,4 @@ LEFT JOIN teams tms USING (team_id)
 LEFT JOIN daysSince ds USING (player_id,game_id)
 LEFT JOIN players ply USING (player_id)
 --LEFT JOIN q1 USING (player_id,game_id)
-LEFT JOIN 
---get opponent shot profile
-    (SELECT team_id as opp_id,game_id, ra_fga as ra_fgallowed, paint_fga as paint_fgallowed,
-     mid_fga as mid_fgallowed, lc_fga as lc_fgallowed, rc_fga as rc_fgallowed,
-     abv_fga as abv_fgallowed, open_fg3a, wide_fg3a, open_fg2a, wide_fg2a,
-     games_in_five as oppGamesFive, games_in_three as oppGamesThree,
-     daysBetweenGames as oppDaysLastGame,pace as oppPace,open3_rate, wide3_rate, open2_rate,
-     wide2_rate,count_inactive, 
-
---to be used to help replace missing values, will be deleted
-    --moving/season averages
-    AVG(pace) OVER (PARTITION BY season,team_id
-    ORDER BY game_number ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) AS mvAvgOppPace,
-    AVG(def_rate) OVER (PARTITION BY season,team_id
-    ORDER BY game_number ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) AS mvAvgOppDefRating,
-    
-    
---rolling averages on rate stats
-    SUM(open_fg3a) OVER (PARTITION BY season,team_id
-    ORDER BY game_number ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) * 1.0
-    / SUM(threes_fga) OVER (PARTITION BY season,team_id
-    ORDER BY game_number ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) AS mvAvgOppOpen3,
-    SUM(wide_fg3a) OVER (PARTITION BY season,team_id
-    ORDER BY game_number ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) * 1.0
-    / SUM(threes_fga) OVER (PARTITION BY season,team_id
-    ORDER BY game_number ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) AS mvAvgOppWide3,   
-
---season averages    
-    AVG(pace) OVER (PARTITION BY season,team_id
-    ORDER BY game_number ROWS UNBOUNDED PRECEDING) AS seasonOppPace,
-       AVG(def_rate) OVER (PARTITION BY season,team_id
-    ORDER BY game_number ROWS UNBOUNDED PRECEDING) AS seasonOppDefRating,
-    
---season averages on rate stats
-    SUM(open_fg3a) OVER (PARTITION BY season,team_id
-    ORDER BY game_number ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) * 1.0
-    / SUM(threes_fga) OVER (PARTITION BY season,team_id
-    ORDER BY game_number ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS seasonOppOpen3,
-    
-    SUM(wide_fg3a) OVER (PARTITION BY season,team_id
-    ORDER BY game_number ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) * 1.0
-    / SUM(threes_fga) OVER (PARTITION BY season,team_id
-    ORDER BY game_number ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS seasonOppWide3
- 
-    FROM team_def) opp on opp.game_id = plogs.game_id and plogs.team_id <> opp.opp_id
+LEFT JOIN  opp_data on opp_data.game_id = plogs.game_id and plogs.team_id <> opp_data.opp_id

@@ -19,7 +19,7 @@ CREATE VIEW team_def AS
     ),
     
  daysSince AS (
-    SELECT team_id, game_date,
+    SELECT team_id, game_id,
     julianday(lag(game_date,1) OVER (PARTITION BY team_id,season ORDER BY game_date)) as game1_date,
     julianday(lag(game_date,2) OVER (PARTITION BY team_id,season ORDER BY game_date)) as game2_date,
     julianday(lag(game_date,3) OVER (PARTITION BY team_id,season ORDER BY game_date)) as game3_date,
@@ -59,7 +59,7 @@ round(pace  * def_rate / 100) as points_allowed,
 win, home, sht.*, threes_fga
 FROM shotsAllowed sht
 JOIN teamLog log USING (team_id,game_id)
-JOIN daysSince ds USING (team_id,game_date)
+JOIN daysSince ds USING (team_id,game_id)
 JOIN grpdShots grps USING(team_id,game_id)
 JOIN teams tms USING (team_id)
 JOIN OppResid resid on sht.game_id = resid.game_id and sht.team_id <> resid.opp_id

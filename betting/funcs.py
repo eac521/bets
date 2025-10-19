@@ -1,15 +1,17 @@
 import json
 import requests
 from itertools import combinations
+import os
+import datetime as dt
 '''
 Creating general betting functions that will be shared between NFL and NBA
 '''
 class odds():
     
-    def __init__(self,configPath='config.json'):
+    def __init__(self,configPath=os.path.join(os.path.dirname(__file__), 'config.json')):
         self.dct = json.loads(open(configPath,'r').read())
-        self.freeApi = dct.get('oddsApi').get('free')
-        self.paid = dct.get('oddsApi').get('paid')
+        self.freeApi = self.dct.get('oddsApi').get('free')
+        self.paid = self.dct.get('oddsApi').get('paid')
         self.nbaEvents = 'https://api.the-odds-api.com/v4/sports/basketball_nba/events?apiKey={}&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'
         self.nflEvents = self.events = 'https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events?apiKey={}&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'
         self.todayISO = (dt.datetime.now()).strftime('%Y-%m-%dT%H:%M:00Z')

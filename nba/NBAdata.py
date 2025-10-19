@@ -84,7 +84,7 @@ class data(base):
         Inputs: str for game date formatted as YYYY-MM-DD
         Output: DataFrame of your X values
         '''
-        crnBin = pd.read_pickle('../nba/data/parquet/cornerBin.pickle')
+        crnBin = pd.read_pickle('../nba/data/model/2025-26Run/cornerBin.pickle')
         # team defense needs to be done here for all moving averages/coeff vars as it moves to player level after this.
         tmsa = self.rolling_team_sa()
         tmsa = tmsa.join(self.weighted_moving_avg(tmsa, 5, 15, 'crn_fgallowed', 'opp_id'))
@@ -97,23 +97,24 @@ class data(base):
         final['crn_kurtSkew'] = final.crn_fgakurt * final.crn_fgaskew
         final = final.join(self.weighted_moving_avg(final, 5, 15, 'crn_fga', 'player_id'))
         final = final.join(self.weighted_moving_avg(final, 5, 15, 'abv_fga', 'player_id'))
-        final = final.join(self.weighted_moving_avg(final, 5, 15, 'abvFgaFirst', 'player_id'))
-        final = final.join(self.weighted_moving_avg(final, 5, 15, 'crnFgaFirst', 'player_id'))
-        final = final.join(self.weighted_moving_avg(final, 5, 15, 'minFirst', 'player_id'))
-        final = final.join(self.rolling_coeffecient_var(final, 5, 15, 'minFirst', 'player_id'))
-        final = final.join(self.rolling_coeffecient_var(final, 5, 15, 'abvFgaFirst', 'player_id'))
-        final = final.join(self.rolling_coeffecient_var(final, 5, 15, 'crnFgaFirst', 'player_id'))
+        # final = final.join(self.weighted_moving_avg(final, 5, 15, 'abvFgaFirst', 'player_id'))
+        # final = final.join(self.weighted_moving_avg(final, 5, 15, 'crnFgaFirst', 'player_id'))
+        # final = final.join(self.weighted_moving_avg(final, 5, 15, 'minFirst', 'player_id'))
+        # final = final.join(self.rolling_coeffecient_var(final, 5, 15, 'minFirst', 'player_id'))
+        # final = final.join(self.rolling_coeffecient_var(final, 5, 15, 'abvFgaFirst', 'player_id'))
+        # final = final.join(self.rolling_coeffecient_var(final, 5, 15, 'crnFgaFirst', 'player_id'))
         final = final.join(self.weighted_moving_avg(final, 5, 15, 'threesMade', 'player_id'))
         final['cornerRatio'] = crnBin.transform(final.abv_fgaMv / (final.abv_fgaMv + final.crn_fgaMv))
         final['crn_interaction'] = final.crn_fgaMv * final.crn_fgallowed
         final['abv_interaction'] = final.abv_fgaMv * final.abv_fgallowed
         final['wide_interaction'] = final.mvAvgOppWide3 * final.mvAvgThrPtPrct
+        final['crResid_interaction'] = final.cornerRatio * final.threes_residualsAllowedMv
 
 
         final['usage_interaction'] = final.mvAvgUsage * final.mvAvgOppPace
 
         # dropping the fga columns as they have been used for shots and shots allowed
-        dropCols = ['ra_fga', 'mid_fga', 'paint_fga','opp_id', 'crn_fga','abv_fga','minFirst','crnFgaFirst','abvFgaFirst']
+        dropCols = ['ra_fga', 'mid_fga', 'paint_fga','opp_id', 'crn_fga','abv_fga',]
         final.drop(dropCols, axis=1, inplace=True)
         # fill na for first game/opp game of season, adding in a 9 as this is similar to the all-star break
         final.daysBetweenGames.fillna(9, inplace=True)

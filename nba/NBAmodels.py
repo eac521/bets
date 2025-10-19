@@ -11,9 +11,9 @@ class models(base):
         super().__init__()
         models_configs = {
             'threes': {
-                'model_path': '../nba/data/model/ThrMod2.pkl',
-                'scaler_path': '../nba/data/model/scalValsThrees.pkl',
-                'data_path': '../nba/data/sql/thrTesting.sql'
+                'model_path': '../nba/data/model/2025-26Run/threeModel.pkl',
+                'scaler_path': '../nba/data//model/2025-26Run/scaler.pkl',
+                'data_path': '../nba/data/sql/threeRunQ.sql'
             },
             'points': {
                 'model_path': '../nba/data/model/pointsModel.pkl',

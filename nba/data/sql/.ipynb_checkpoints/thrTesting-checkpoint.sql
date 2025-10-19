@@ -12,7 +12,7 @@ threesMade,
 name, player_id, game_id, game_date, season, team,
 
 --demo data
-height, exp, age,
+height, exp,
 
 --shot locations, will have percentiles done in pandas
 ra_fga, paint_fga, mid_fga, (COALESCE(lc_fga,0) + COALESCE(rc_fga,0)) crn_fga, abv_fga,
@@ -26,7 +26,6 @@ CASE WHEN daysBetweenGames > 9  THEN 10 ELSE daysBetweenGames END -
 CASE WHEN oppDaysLastGame > 9 THEN 10 ELSE oppDaysLastGame END AS netRest,
 
  home, tmGameCt, starter,
-CASE WHEN plyrGameCt<= 10 THEN 1 ELSE 0 END as plyrFirst10,
 --rolling offensive (5 games and season) metrics
 AVG(starter) OVER (PARTITION BY season,player_id
     ORDER BY plyrGameCt ROWS BETWEEN 11 PRECEDING AND 1 PRECEDING) AS mvAvgstart, 
@@ -96,12 +95,12 @@ FROM pgames
 WHERE player_id||season in 
                     (SELECT player_id||season
                     FROM pgames 
-                    WHERE game_date > '2021-10-01'
 
                     group by player_id||season
 
-                    HAVING AVG(min) > 15
-                    and max(plyrGameCt) >= 16
+                    HAVING (AVG(min) > 15
+                    and max(plyrGameCt) >= 16)
+                    OR season = '2025-26'
 
     )
 order by game_date
