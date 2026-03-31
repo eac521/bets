@@ -41,8 +41,6 @@ case when julianday(log.game_date) - game1_date < 5 then 1 else 0 end) + 1 games
 case when julianday(log.game_date) - game3_date < 3 then 1 else 0 end +
 case when julianday(log.game_date) - game2_date < 3 then 1 else 0 end +
 case when julianday(log.game_date) - game1_date < 3 then 1 else 0 end) + 1 games_in_three,
-open_fg3a,
-wide_fg3a,
 --open shot rates    
 open_fg3a / threes_fga as open3_rate,
 wide_fg3a / threes_fga as wide3_rate,
@@ -54,8 +52,8 @@ PaintAllowedVsAvg,
 MidAllowedVsAvg,
 ThreesAllowedVsAvg,
 
-count_inactive,def_rate,pace,
-round(pace  * def_rate / 100) as points_allowed,
+count_inactive,defensive_rating,pace,
+round(pace  * defensive_rating / 100) as points_allowed,
 win, home, sht.*, threes_fga
 FROM shotsAllowed sht
 JOIN teamLog log USING (team_id,game_id)

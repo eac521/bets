@@ -31,6 +31,7 @@ class models(base):
         self.data = pd.read_sql(open(models_configs[self.name]['data_path'],'r').read(),self.conn)
         self.scaler = self.load(models_configs[self.name]['scaler_path'])
         self.model = self.load(models_configs[self.name]['model_path'])
+        self.features = self.model.params.index.tolist()
 
 
 
@@ -65,7 +66,7 @@ class models(base):
         Output: X train, y train, X test, y test
         '''
         ##getting the splits based on time
-        yst = (dt.datetime.today() + pd.to_timedelta(-1, unit='day')).strftime(format='%Y-%m-%d')
+        yst = '2025-10-01'
         X = trainData[trainData.game_date.between(startDate, endDate)]
         Xtest = trainData[trainData.game_date.between(endDate, yst)]
         y = trainData[trainData.game_date.between(startDate, endDate)][yCol].values
@@ -86,9 +87,11 @@ class models(base):
         Inputs: DataFrame and dictionary
         Output: New scaled DataFrame
         '''
-        for col in self.scaler:
-            print(col)
-            df[col] = (df[col] - self.scaler.get(col).get('mean')) / self.scaler.get(col).get('std')
+        for col in df.columns:
+            try:
+                df[col] = (df[col] - self.scaler.get(col).get('center')) / self.scaler.get(col).get('var')
+            except:
+                pass
         return df
 
 

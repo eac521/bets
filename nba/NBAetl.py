@@ -4,31 +4,22 @@ import time
 import re
 from tqdm import tqdm
 import requests
+from itertools import permutations
+import random
+from requests.exceptions import HTTPError
 from nba_api.stats.endpoints import (
-	BoxScoreAdvancedV3, PlayByPlayV2, BoxScoreSummaryV2,
+	BoxScoreAdvancedV3, PlayByPlayV3, BoxScoreSummaryV2,
 	LeagueDashTeamShotLocations, LeagueDashOppPtShot,
 	LeagueDashPlayerShotLocations, PlayerGameLogs, TeamInfoCommon,
 	leaguegamefinder, LeagueDashPtStats, PlayerIndex,
 	CommonPlayerInfo, PlayerAwards, GameRotation, LeagueDashPlayerPtShot
 )
+from nba_api.live.nba.endpoints import BoxScore
 from .NBAbase import base
-
 class etl(base):
 	
 	def __init__(self):
 		super().__init__()
-
-	def reindex(self):
-		'''This will get all the existing indices and re-index them in the database
-		'''
-		q = '''SELECT name
-			FROM sqlite_master 
-			WHERE type = 'index' 
-			AND tbl_name IN ('plyrLogs', 'teamLog', 'players', 'teams','shotsAllowed')
-			AND name not like '%_autoindex_%'
-			ORDER BY tbl_name, name;'''
-		[self.cur.execute('REINDEX {}'.format(r[0])) for r in self.cur.execute(q).fetchall()]
-		return print('Updated indices')
 
 
 	def reload_player_log(self, game_dates, seasons, qtr=0):
@@ -42,9 +33,7 @@ class etl(base):
 		for season in seasons:
 			reg = PlayerGameLogs(season_nullable=season).get_data_frames()[0]
 			time.sleep(30)
-			#aTemp =
-			PlayerGameLogs(season_nullable=season, measure_type_player_game_logs_nullable='Advanced').get_data_frames()[
-				0]
+			aTemp = PlayerGameLogs(season_nullable=season, measure_type_player_game_logs_nullable='Advanced').get_data_frames()[0]
 			log = pd.concat([log, reg])
 			adv = pd.concat([adv, aTemp])
         
@@ -75,16 +64,15 @@ class etl(base):
 		strD = ','.join(["'{}'".format(d) for d in game_dates])
 		log = self.get_logs(game_dates,seasons) #has all 4
 		bskt = self.get_first_buckets(game_dates) #playerid,gameid
-		time.sleep(np.random.randint(30,120))
+		time.sleep(np.random.randint(1,15))
 		rbs = self.get_rebounds(game_dates) #all 4
 		adv = self.get_advanced_box(game_dates) # gameid,playerid
-		time.sleep(np.random.randint(30,120))
+		time.sleep(np.random.randint(1,15))
 		shts = self.get_player_shot_spots(game_dates) #has playerid,gamedate,teamid
 		#merge dataframes together
 		logrbs = log.merge(rbs,how='left',on=['PLAYER_ID','GAME_ID','TEAM_ID','GAME_DATE']).fillna(0)
 		logRbsSht = logrbs.merge(shts,how='left',on=['TEAM_ID','PLAYER_ID','GAME_DATE'])
 		advBskt = adv.merge(bskt,how='left',on = ['PLAYER_ID','GAME_ID'])
-		
 		#final dataframe
 		final = logRbsSht.merge(advBskt,how='left',on=['PLAYER_ID','GAME_ID'])
 		final.columns = ['player_id','team_id','game_id','game_date','min','ftm','fta','reb','ast','tov','stl','blk','blka','pf',
@@ -93,18 +81,17 @@ class etl(base):
 			'mid_fga', 'lc_fgm','lc_fga', 'rc_fgm','rc_fga','abv_fgm', 'abv_fga', 'offensiveRating','defensiveRating',
 			'usagePercentage', 'pace', 'possessions','Starter','team_first', 'game_first']
 		final = final.filter(pd.read_sql('select * from plyrLogs limit 1',self.conn).columns.values)
-		if (pd.read_sql("select count(*) as ct  from {} where game_date in ({})".format(strD,table,strD),self.conn).sum()>0).all():
-			self.conn.execute("DELETE FROM {} where game_date in ({})".format(strD,table))
+		if (pd.read_sql("select count(*) as ct  from {} where game_date in ({})".format(table,strD),self.conn).sum()>0).all():
+			self.conn.execute("DELETE FROM {} where game_date in ({})".format(table,strD))
 			self.conn.commit()
 		self.insert_data(final,table)
-		if np.random.randit % 7==0:
-			time.sleep(np.random.randit(30,120))
+		if np.random.randint(0,100) % 7==0:
+			time.sleep(np.random.randint(30,120))
 		#return final
 		
 	def update_teamLog(self,game_ids):
 		strD = ','.join(["'{}'".format(d) for d in game_ids])
 		df = self.get_summary(game_ids)
-		sqlorder = self.cur.execute('select * from teamLog limit 1').description
 		if (pd.read_sql("select count(*) as ct  from teamLog where game_id in ({})".format(strD),self.conn).sum()>0).all():
 			self.conn.execute("DELETE FROM teamLog where game_id in ({})".format(strD))
 			self.conn.commit()
@@ -135,20 +122,23 @@ class etl(base):
 			'7+_Dribbles_FG3A'
 		]
 		games = self.get_games(min(game_dates),max(game_dates))
-		drb = self.get_opp_dribble_shot(game_dates)
-		print('Completed dribble data')
+		#drb = self.get_opp_dribble_shot(game_dates)
+		#print('Completed dribble data')
 		spots = self.get_opp_shot_spot(game_dates)
 		print('Completed spot data')
-		op = self.get_open_shot_allowed((game_dates))
+		op = self.get_open_shot_allowed(game_dates)
 		print('Completed open shot data')
-		
-		sht = spots.merge(drb,how='left',on=['GAME_DATE','TEAM_ID'])
+		#sht = spots.merge(drb,how='left',on=['GAME_DATE','TEAM_ID'])
 		if len(op) != 0:
-			final = sht.merge(op,how='left',on=['GAME_DATE','TEAM_ID'])
+			final = spots.merge(op,how='left',on=['GAME_DATE','TEAM_ID'])
 			final = final.merge(games,how='left', on=['GAME_DATE','TEAM_ID'])
 		else:
-			final = sht.merge(games,how='left', on=['GAME_DATE','TEAM_ID'])
+			final = spots.merge(games,how='left', on=['GAME_DATE','TEAM_ID'])
+		for col in sqlOrd:
+			if col not in final.columns:
+				final[col] = np.nan
 		final = final.filter(sqlOrd)
+
 		if (pd.read_sql("select count(*) as ct  from shotsAllowed where game_date in ({})".format(strD),self.conn).sum()>0).all():
 			self.conn.execute("DELETE FROM shotsAllowed where game_date in ({})".format(strD))
 			self.conn.commit()
@@ -171,7 +161,7 @@ class etl(base):
 	def get_rebounds(self,game_dates,qtr=0):
 		'''
 		Get rebounding information at the player level
-		Inputs: game dates you are running for
+		Inputs: list of game dates you are running for
 		Output: DataFrame with rebounding related columns
 		'''
 		print('started rebounds at {}'.format(time.strftime('%H:%M')))
@@ -181,7 +171,7 @@ class etl(base):
 			'DREB','DREB_CONTEST','DREB_CHANCES','DREB_CHANCE_DEFER','AVG_DREB_DIST']
 		rbs = LeagueDashPtStats(pt_measure_type='Rebounding',player_or_team='Player',
 			date_from_nullable = minDate,
-			date_to_nullable = maxDate,period_nullable = qtr
+			date_to_nullable = maxDate,timeout=60
 		).get_data_frames()[0][rbsCols]
 		final = rbs.merge(games ,how='left',on=['TEAM_ID'])
 		
@@ -210,7 +200,8 @@ class etl(base):
 			season = '{}-{}'.format(minD.year,str(minD.year+1)[-2:]) if minD.month>=10 else '{}-{}'.format(minD.year-1,str(minD.year)[-2:])
 			seasonLog = PlayerGameLogs(date_from_nullable = minD.strftime('%m/%d/%Y'),
 				date_to_nullable = maxD.strftime('%m/%d/%Y'),
-				season_nullable = season, period_nullable = qtr).get_data_frames()[0][logCols]
+				season_nullable = season, period_nullable = qtr,league_id_nullable='00'
+									   ,timeout=60).get_data_frames()[0][logCols]
 			seasonLog = seasonLog.filter(logCols)
 			seasonLog.GAME_DATE = seasonLog.GAME_DATE.apply(lambda x: x[:10])
 			seasonLog = seasonLog[seasonLog.GAME_DATE.isin(game_dates)]
@@ -243,7 +234,7 @@ class etl(base):
 			oppShots = LeagueDashTeamShotLocations(measure_type_simple='Opponent',
 												   date_from_nullable=date,
 												   date_to_nullable=date,
-												   season=season
+												   season=season,timeout=60
 												   ).get_data_frames()[0]
 			oppShots.columns = ['{}_{}'.format(re.sub(' |-', '_', a), b) if a != '' else b for a, b in oppShots.columns]
 			oppShots = oppShots.filter([col for col in oppShots.columns if re.search('_PCT$|NAME', col) == None])
@@ -268,7 +259,8 @@ class etl(base):
 				drbShots = LeagueDashOppPtShot(date_from_nullable=date,
 											   date_to_nullable=date,
 											   season=season,
-											   dribble_range_nullable=dribbleCount).get_data_frames()[0]
+											   dribble_range_nullable=dribbleCount
+											   ,timeout=60).get_data_frames()[0]
 				df = drbShots.filter([col for col in drbShots.columns if re.search('[2-3][A|M]$|ID$', col) != None])
 				df.columns = [
 					'{}_{}'.format(dribbleCount.replace(' ', '_'), col) if re.search('ID$', col) == None else col for
@@ -277,6 +269,8 @@ class etl(base):
 				drb['GAME_DATE'] = date
 			drb = drb.groupby(['TEAM_ID', 'GAME_DATE']).sum().reset_index()
 			final = pd.concat([final, drb])
+			if len(final) ==0:
+				print('Missing dribble data for {}'.format(date))
 		return final
 
 	def get_plyr_drb_shots(self,game_dates,addSleep=False):
@@ -294,7 +288,8 @@ class etl(base):
 				drbShots = LeagueDashPlayerPtShot(date_from_nullable = date,
 					date_to_nullable = date,
 					season=season,
-					dribble_range_nullable=dribbleCount).get_data_frames()[0]
+					dribble_range_nullable=dribbleCount
+					,timeout=60).get_data_frames()[0]
 				time.sleep(np.random.randint(2,8))
 				df = drbShots.filter([col for col in drbShots.columns if re.search('[2-3][A|M]$|ID$',col)!=None])
 				df.columns = ['{}_{}'.format(dribbleCount.replace(' ','_'),col) if re.search('ID$',col)==None else col for col in df.columns]
@@ -320,7 +315,8 @@ class etl(base):
 			season = '{}-{}'.format(d.year,str(d.year+1)[-2:]) if d.month>=10 else '{}-{}'.format(d.year-1,str(d.year)[-2:])
 			sht = LeagueDashPlayerShotLocations(date_from_nullable = date,
 				date_to_nullable = date,
-				season=season,period = qtr).get_data_frames()[0]
+				season=season,period = qtr,timeout=60).get_data_frames()[0]
+			#op =
 			df = self.clean_shotcolumns(sht)
 			df['GAME_DATE'] = date
 			final = pd.concat([final,df])
@@ -343,10 +339,12 @@ class etl(base):
 		df = pd.DataFrame() 
 		for gid in tqdm(games.GAME_ID.unique()):
 			if qtr is None:
-				advbox = BoxScoreAdvancedV3(gid).get_data_frames()[0].rename(columns={'gameId':'GAME_ID','personId':'PLAYER_ID'})
+				advbox = BoxScoreAdvancedV3(gid,timeout=60).get_data_frames()[0].rename(columns={'gameId':'GAME_ID','personId':'PLAYER_ID'})
 			else:
-				advbox = BoxScoreAdvancedV3(gid,start_period=qtr,end_period=qtr).get_data_frames()[0].rename(columns={'gameId':'GAME_ID','personId':'PLAYER_ID'})
+				advbox = BoxScoreAdvancedV3(gid,
+				start_period=qtr,end_period=qtr,timeout=60).get_data_frames()[0].rename(columns={'gameId':'GAME_ID','personId':'PLAYER_ID'})
 			advbox = advbox.filter(advcols)
+			advbox.drop(advbox[advbox.possessions==0].index,inplace=True)
 			temp = pd.concat(GameRotation(gid).get_data_frames())
 			lst = temp[temp.IN_TIME_REAL==0].PERSON_ID.values.tolist()
 			df = pd.concat([df,advbox])
@@ -364,14 +362,51 @@ class etl(base):
 		gamefinder = leaguegamefinder.LeagueGameFinder(league_id_nullable = '00',
 			date_from_nullable = pd.to_datetime(minDate).strftime('%m/%d/%Y'),
 			date_to_nullable = pd.to_datetime(maxDate).strftime('%m/%d/%Y'),
-			season_type_nullable = 'Regular Season'
-		)  
+			season_type_nullable = 'Regular Season',timeout=60
+		)
 		games = gamefinder.get_data_frames()[0][['GAME_DATE','TEAM_ID','GAME_ID']]
 		if add_season == False:
 			return games
 		else:
 			games['season'] =   ['{}-{}'.format(x[:4],int(x[2:4])+1) if int(x[5:7]) > 9 else '{}-{}'.format(int(x[:4])-1,x[2:4]) for x in games.GAME_DATE]
 			return games
+
+
+	def create_opp_games(self,game_dates):
+		games = self.get_games(min(game_dates), max(game_dates))
+		df = pd.DataFrame(columns=['GAME_ID','GAME_DATE' ,'TEAM_ID', 'OPP_ID'])
+		for gid in games.GAME_ID.unique():
+			perms = list(permutations(games[games.GAME_ID == gid].TEAM_ID.unique()))
+			for p in perms:
+				df.loc[len(df)] = [gid,games[games.GAME_ID==gid].GAME_DATE.values[0]] + list(p)
+		return df
+
+	def get_open_player_shots(selfself,game_dates):
+		openness = ['6+ Feet - Wide Open','4-6 Feet - Open','2-4 Feet - Tight','0-2 Feet - Very Tight']
+		final = pd.DataFrame()
+		for ct, date in enumerate(tqdm(game_dates)):
+			d = pd.to_datetime(date)
+			season = '{}-{}'.format(d.year, str(d.year + 1)[-2:]) if d.month >= 10 else '{}-{}'.format(d.year - 1,
+																		   str(d.year)[-2:])
+			shots = pd.DataFrame()
+			for op in openness:
+				temp = LeagueDashPlayerPtShot(date_from_nullable=date,
+												  date_to_nullable=date,
+												  season=season,
+												  dribble_range_nullable=op
+												  , timeout=60).get_data_frames()[0]
+				time.sleep(np.random.randint(2, 8))
+				df = temp.filter([col for col in drbShots.columns if re.search('[2-3][A|M]$|ID$', col) != None])
+				df.columns = [
+					'{}_{}'.format(op.replace(' ', '_'), col) if re.search('ID$', col) == None else col for
+					col in df.columns]
+				shots = pd.concat([drb, df])
+				shots['GAME_DATE'] = date
+			shots = shots.groupby(['PLAYER_ID', 'GAME_DATE', 'PLAYER_LAST_TEAM_ID']).sum().reset_index()
+			final = pd.concat([final, drb])
+			if np.random.randint(0, 100) % 6 == 0:
+				time.sleep(np.random.randint(25, 95))
+		return final
 
 	def get_open_shot_allowed(self,game_dates):
 		'''get the type of shots (ranges) that a team allows, will also get the number of wide-open and open 2 and 3pt looks a team allows.  This needs to be done day-by-day as the granularity is only by team, so we can not get game-by-game information.
@@ -385,7 +420,7 @@ class etl(base):
 				str(d.year)[-2:])
 			wide = LeagueDashOppPtShot(date_from_nullable=date,
 				date_to_nullable=date, season=season,
-				close_def_dist_range_nullable='6+ Feet - Wide Open').get_data_frames()[0]
+				close_def_dist_range_nullable='6+ Feet - Wide Open',timeout=60).get_data_frames()[0]
 			wide = wide.filter([col for col in wide.columns if (re.search('_FREQUENCY$|PCT$|^G|FGM|FGA', col) == None) &
 				(wide[col].dtype != object)])
 			wide.columns = [col if re.search('FG', col) == None else 'WIDEOPEN_{}'.format(col) for col in wide.columns]
@@ -393,7 +428,7 @@ class etl(base):
 
 			op = LeagueDashOppPtShot(date_from_nullable=date,
 				date_to_nullable=date, season=season,
-				close_def_dist_range_nullable='4-6 Feet - Open').get_data_frames()[0]
+				close_def_dist_range_nullable='4-6 Feet - Open',timeout=60).get_data_frames()[0]
 			op = op.filter([col for col in op.columns if (re.search('_FREQUENCY$|PCT$|^G|FGM|FGA', col) == None) &
 				(op[col].dtype != object)])
 			op.columns = [col if re.search('FG', col) == None else 'OPEN_{}'.format(col) for col in op.columns]
@@ -410,49 +445,122 @@ class etl(base):
 		Inputs: List of game_ids
 		Output: write to sqlite table and a df
 		'''
-		
-		sqlorder = ['GAME_ID','GAME_DATE','TEAM_ID','inactive','count_inactive','assistPercentage','offensiveRating',
-			'defensiveRating','pace','possessions','offensiveReboundPercentage','defensiveReboundPercentage',
-			'PTS_2ND_CHANCE','PTS_FB','TEAM_TURNOVERS','PTS_OFF_TO','home','PTS_QTR1','PTS_QTR2','PTS_QTR3',
-			'PTS_QTR4','PTS_OT1','PTS_OT2','PTS_OT3','PTS_OT4','wins','season']
+
 		df = pd.DataFrame()
-		for ct,gameid in enumerate(tqdm(game_ids)):
-			b = BoxScoreSummaryV2(game_id=gameid).get_data_frames()
-			gameDate = b[0].GAME_DATE_EST.str[:10][0]
-			d = pd.to_datetime(gameDate)
-			season = '{}-{}'.format(d.year, str(d.year + 1)[-2:]) if d.month >= 10 else '{}-{}'.format(d.year - 1,
-				str(d.year)[-2:])
-			teamStats = b[1][['TEAM_ID','PTS_2ND_CHANCE','PTS_FB','TEAM_TURNOVERS','PTS_OFF_TO']]
-			inAct = b[3].groupby(['TEAM_ID']).PLAYER_ID.agg([list,'count']).reset_index()
-			inAct['list'] = inAct.list.apply(lambda x:','.join([str(ply) for ply in x]))
-			inAct = inAct.rename(columns = {'list':'inactive','count':'count_inactive'})
-			adv = BoxScoreAdvancedV3(gameid).get_data_frames()[1].filter(['gameId', 'teamId','assistPercentage','offensiveRating','defensiveRating','pace','possessions','offensiveReboundPercentage',
-				'defensiveReboundPercentage']).rename(columns={'gameId':'GAME_ID','teamId':'TEAM_ID'})
-			scoringdf = b[5].filter([col for col in b[5].columns if (col.find('PTS_')>-1) & (b[5][col].sum()!=0)]+['GAME_ID','TEAM_ID'])
-			home = b[7].filter(['GAME_ID','HOME_TEAM_ID'])
-			
-			advHome = adv.merge(home,how='left',on='GAME_ID')
-			scoringdf = scoringdf.merge(teamStats,how='left',on='TEAM_ID')
-			advHome.HOME_TEAM_ID = np.where(advHome.HOME_TEAM_ID == advHome.TEAM_ID,1,0)
-			advHome = advHome.rename(columns = {'HOME_TEAM_ID':'home'})
-			advInact = inAct.merge(advHome,how='right',on=['TEAM_ID'])
-			final = advInact.merge(scoringdf,how='left',on=['TEAM_ID','GAME_ID'])
-			final['GAME_DATE'] = gameDate
-			df = pd.concat([df,final])
-			df['Total'] = df.filter([col for col in df.columns if col.find('PTS_') > -1]).sum(axis=1)
-			df['wins'] = np.where(df.groupby('GAME_ID').Total.transform('max') == df.Total, 1, 0)
-			df['season'] = season
-			
-			df.drop(['Total'],axis=1,inplace=True)
-			for col in sqlorder:
-				if col not in df.columns:
-					df[col] = None
-			if ct % 15 == 0:
-				time.sleep(np.random.choice(range(2,10)))
-			#df.to_pickle('nba/data/pickle/teamlog5.pkl')
-			if ct % 150 == 0 and ct != 0 :
-				time.sleep(np.random.choice(range(10,30)))
-		return df.filter(sqlorder)
+		cols = pd.read_sql('select * from teamLog limit 1',self.conn).columns
+		# Constants
+		REQUESTS_PER_ITERATION = 2  # BoxScoreSummaryV2 + BoxScoreAdvancedV3
+		SAFE_REQUESTS_PER_MINUTE = 550  # Conservative buffer below ~600 limit
+		MIN_DELAY = 60 / (SAFE_REQUESTS_PER_MINUTE / REQUESTS_PER_ITERATION)  # ~0.22 seconds
+
+		for ct, gameid in enumerate(tqdm(game_ids)):
+			retry_count = 0
+			max_retries = 3
+
+			while retry_count < max_retries:
+				try:
+					bx = BoxScore(game_id=gameid)
+					aLine = {'q{}_pts'.format(d.get('period')) if d.get('period') < 5 else 'ot{}_pts'.format(
+						d.get('period') - 4): d.get('score') for d in bx.away_team_stats.data.get('periods')}
+					a = {'team_id': bx.away_team.data.get('teamId'),
+						 'game_id': bx.game_details.data.get('gameId'),
+						 'game_date': bx.game_details.data.get('gameTimeLocal')[:10],
+						 'home': 0,
+						 'attendance': 0,
+						 'win': 1 if bx.away_team.data.get('score') > bx.home_team.data.get('score') else 0,
+						 'opp_id': bx.home_team.data.get('teamId'),
+						 'inactive': [p.get('personId') for p in bx.away_team.data.get('players') if
+									  p.get('status') == 'INACTIVE'],
+						 'count_inactive': len([p.get('personId') for p in bx.away_team.data.get('players') if
+												p.get('status') == 'INACTIVE']),
+						 'bench_points': bx.away_team_stats.data.get('statistics').get('benchPoints'),
+						 'bp_allowed': bx.home_team_stats.data.get('statistics').get('benchPoints'),
+						 'points_off_turnovers': bx.away_team_stats.data.get('statistics').get('pointsFromTurnovers'),
+						 'to_points_allowed': bx.home_team_stats.data.get('statistics').get('pointsFromTurnovers'),
+						 'points_fast_break': bx.away_team_stats.data.get('statistics').get('pointsFastBreak'),
+						 'fb_points_allowed': bx.home_team_stats.data.get('statistics').get('pointsFastBreak'),
+						 'second_chance_points': bx.away_team_stats.data.get('statistics').get(
+							 'secondChancePointsMade'),
+						 'sc_points_allowed': bx.home_team_stats.data.get('statistics').get('secondChancePointsMade'),
+						 'biggest_lead': bx.away_team_stats.data.get('statistics').get('biggestLead'),
+						 'biggest_deficit': bx.home_team_stats.data.get('statistics').get('biggestLead'),
+						 'biggest_run': bx.away_team_stats.data.get('statistics').get('biggestScoringRun'),
+						 'biggest_run_allowed': bx.home_team_stats.data.get('statistics').get('biggestScoringRun'),
+						 'time_leading': bx.away_team_stats.data.get('statistics').get('timeLeading'),
+						 'times_tied': bx.away_team_stats.data.get('statistics').get('timesTied'),
+						 }
+					hLine = {'q{}_pts'.format(d.get('period')) if d.get('period') < 5 else 'ot{}_pts'.format(
+						d.get('period') - 4): d.get('score') for d in bx.home_team.data.get('periods')}
+					h = {'team_id': bx.home_team.data.get('teamId'),
+						 'game_id': bx.game_details.data.get('gameId'),
+						 'game_date': bx.game_details.data.get('gameTimeLocal')[:10],
+						 'home': 1,
+						 'attendance': bx.game_details.data.get('attendance'),
+						 'win': 1 if bx.home_team.data.get('score') > bx.away_team.data.get('score') else 0,
+						 'opp_id': bx.away_team.data.get('teamId'),
+						 'inactive': [p.get('personId') for p in bx.home_team.data.get('players') if
+									  p.get('status') == 'INACTIVE'],
+						 'count_inactive': len([p.get('personId') for p in bx.home_team.data.get('players') if
+												p.get('status') == 'INACTIVE']),
+						 'bench_points': bx.home_team.data.get('statistics').get('benchPoints'),
+						 'bp_allowed': bx.away_team_stats.data.get('statistics').get('benchPoints'),
+						 'points_off_turnovers': bx.home_team_stats.data.get('statistics').get('pointsFromTurnovers'),
+						 'to_points_allowed': bx.away_team_stats.data.get('statistics').get('pointsFromTurnovers'),
+						 'points_fast_break': bx.home_team_stats.data.get('statistics').get('pointsFastBreak'),
+						 'fb_points_allowed': bx.away_team_stats.data.get('statistics').get('pointsFastBreak'),
+						 'second_chance_points': bx.home_team_stats.data.get('statistics').get(
+							 'secondChancePointsMade'),
+						 'sc_points_allowed': bx.away_team_stats.data.get('statistics').get('secondChancePointsMade'),
+						 'biggest_lead': bx.home_team.data.get('statistics').get('biggestLead'),
+						 'biggest_deficit': bx.away_team.data.get('statistics').get('biggestLead'),
+						 'biggest_run': bx.home_team.data.get('statistics').get('biggestScoringRun'),
+						 'biggest_run_allowed': bx.away_team.data.get('statistics').get('biggestScoringRun'),
+						 'time_leading': bx.home_team.data.get('statistics').get('timeLeading'),
+						 'times_tied': bx.home_team.data.get('statistics').get('timesTied'),
+
+						 }
+					h.update(hLine)
+					a.update(aLine)
+					bxScore = pd.concat(
+						[pd.DataFrame.from_dict(h, orient='index').T, pd.DataFrame.from_dict(a, orient='index').T])
+					adv = BoxScoreAdvancedV3(gameid).get_data_frames()[1].filter(
+						['gameId', 'teamId', 'assistPercentage', 'offensiveRating', 'defensiveRating', 'pace',
+						 'possessions', 'offensiveReboundPercentage', 'defensiveReboundPercentage']).rename(
+						columns={'gameId': 'game_id', 'teamId': 'team_id', 'assistPercentage': 'assist_percentage',
+								 'offensiveRating': 'offensive_rating', 'defensiveRating': 'defensive_rating',
+								 'offensiveReboundPercentage': 'off_rb_pct',
+								 'defensiveReboundPercentage': 'def_rb_pct'})
+					final = bxScore.merge(adv, how='left', on=['game_id', 'team_id'])
+					final['season'] = self.derive_season(bx.game_details.data.get('gameTimeLocal')[:10])
+
+					# for col in pd.read_sql('select * from teamLog limit 1', self.conn).columns:
+					# 	if col not in final.columns:
+					# 		final[col] = None
+
+					# Success - break retry loop
+					df = pd.concat([df,final])
+					break
+
+				except HTTPError as e:
+					if e.response.status_code == 429:  # Rate limit hit
+						retry_count += 1
+						wait_time = (2 ** retry_count) * 5 + random.uniform(0, 5)  # Exponential backoff
+						print(f"Rate limit hit. Waiting {wait_time:.1f}s (attempt {retry_count}/{max_retries})")
+						time.sleep(wait_time)
+					else:
+						raise
+
+			# Consistent small delay between requests
+			time.sleep(MIN_DELAY + random.uniform(0, 0.1))
+
+			# Extra buffer every 100 requests
+			if ct > 0 and ct % 100 == 0:
+				time.sleep(random.uniform(2, 5))
+		for col in cols:
+			if col not in df.columns:
+				df[col] = None
+		df['inactive'] = [','.join([str(y) for y in x])  for x in df.inactive]
+		return df.filter(cols)
 
 	def get_player_info(self,pid):
 		pinfo = ['PERSON_ID','DISPLAY_FIRST_LAST','HEIGHT','WEIGHT','POSITION','DRAFT_YEAR','DRAFT_NUMBER','BIRTHDATE']
@@ -497,9 +605,9 @@ class etl(base):
 		print('Need to get {} new players'.format(len(plyers)))
 		for ct,pid in enumerate(tqdm(plyers)):
 			pin = self.get_player_info(pid)
-			award = self.get_awards(pid)
-			ply = pin.merge(award,how='left',on='PERSON_ID')
-			final = pd.concat([final,ply])
+			#award = self.get_awards(pid)
+			#ply = pin.merge(award,how='left',on='PERSON_ID')
+			final = pd.concat([final,pin])
 
 			time.sleep(np.random.choice(range(2,5)))
 			if ct % 50==0 and ct != 0:
@@ -529,12 +637,12 @@ class etl(base):
 		else:
 			gameids = games.GAME_ID.unique() 
 		for ct,gameid in enumerate(tqdm(gameids)):
-			df = PlayByPlayV2(gameid).get_data_frames()[0]
+			df = PlayByPlayV3(gameid).get_data_frames()[0]
 			try:
-				aind = df[(df.EVENTMSGTYPE==1) & (df.HOMEDESCRIPTION.notna())].PLAYER1_ID.values[0]
-				aev = df[(df.EVENTMSGTYPE==1) & (df.PLAYER1_ID==aind)].EVENTNUM.min()
-				hind = df[(df.EVENTMSGTYPE==1) & (df.VISITORDESCRIPTION.notna())].PLAYER1_ID.values[0]
-				hev = df[(df.EVENTMSGTYPE==1) & (df.PLAYER1_ID==hind)].EVENTNUM.min()
+				aind = df[(df.actionType == 'Made Shot') & (df.location == 'v')].personId.values[0]
+				aev = df[(df.actionType == 'Made Shot') & (df.personId == aind)].actionNumber.min()
+				hind = df[(df.actionType == 'Made Shot') & (df.location == 'h')].personId.values[0]
+				hev = df[(df.actionType == 'Made Shot') & (df.personId == hind)].actionNumber.min()
 				gd = {'gameid':gameid,'homePlayer':hind,
 					'awayPlayer':aind,
 					'firstPlayer':aind if aev < hev else hind}
@@ -551,14 +659,75 @@ class etl(base):
 		df = pd.DataFrame([x for y in l for x in y],columns = ['GAME_ID','PLAYER_ID','team_first','game_first'])
 		print('\tcompleted at {}'.format(time.strftime('%H:%M')))
 		return df
-	def derive_opp_data_table(self):
-		self.cur.execute(open('../nba/data/sql/derive_opp_table.sql','r').read())
-		self.cur.execute("CREATE INDEX IF NOT EXISTS idx_opp_data ON opp_data(game_id, opp_id)")
-		self.conn.commit()
-		print('opp_table derived')
 
-	def refresh_opp_data(self):
-		"""Rebuild opp_data from source tables"""
-		print("Refreshing opp_data...")
-		self.cur.execute("DROP TABLE IF EXISTS opp_data")
-		self.derive_opp_data_table()
+	def get_tracking_data(self,game_dates):
+		dCols = ['PLAYER_ID', 'TEAM_ID', 'DRIVE_FGM', 'DRIVE_FGA', 'DRIVE_PASSES', 'DRIVE_AST', 'DRIVE_TOV', 'DRIVE_PF']
+		puCols = ['PLAYER_ID', 'TEAM_ID', 'PULL_UP_FGM', 'PULL_UP_FGA', 'PULL_UP_FG3M', 'PULL_UP_FG3A', ]
+		csCols = ['PLAYER_ID', 'TEAM_ID', 'CATCH_SHOOT_FGM', 'CATCH_SHOOT_FGA', 'CATCH_SHOOT_FG3M', 'CATCH_SHOOT_FG3A']
+		passCols = ['PLAYER_ID', 'TEAM_ID', 'PASSES_MADE', 'PASSES_RECEIVED', 'FT_AST', 'SECONDARY_AST', 'POTENTIAL_AST', 'AST_PTS_CREATED',
+					'AST_ADJ']
+		ord =['PLAYER_ID', 'GAME_ID', 'TEAM_ID', 'OPP_ID', 'GAME_DATE', 'DRIVE_FGM',
+       'DRIVE_FGA', 'DRIVE_PASSES', 'DRIVE_AST', 'DRIVE_TOV', 'DRIVE_PF',
+       'PULL_UP_FG2M', 'PULL_UP_FG2A',
+       'PULL_UP_FG3M', 'PULL_UP_FG3A', 'CATCH_SHOOT_FG2M', 'CATCH_SHOOT_FG2A',
+       'CATCH_SHOOT_FG3M', 'CATCH_SHOOT_FG3A', 'PASSES_MADE',
+       'PASSES_RECEIVED', 'FT_AST', 'SECONDARY_AST', 'POTENTIAL_AST',
+       'AST_PTS_CREATED', 'AST_ADJ']
+		mergeCols = ['PLAYER_ID','TEAM_ID']
+		final = pd.DataFrame()
+		for date in tqdm(game_dates):
+			season = self.derive_season(date)
+			games = self.create_opp_games([date])
+			drives = LeagueDashPtStats(date_from_nullable = date,date_to_nullable = date,season=season,
+					pt_measure_type = 'Drives', player_or_team = 'Player',timeout=60).get_data_frames()[0]
+			drives = drives.filter(dCols)
+			time.sleep(.8)
+			pullups = LeagueDashPtStats(date_from_nullable=date, date_to_nullable=date,
+									   pt_measure_type='PullUpShot', player_or_team='Player'
+										,timeout=60).get_data_frames()[0]
+			pullups = pullups.filter(puCols)
+			pullups['PULL_UP_FG2M'] = pullups['PULL_UP_FGM'] - pullups['PULL_UP_FG3M']
+			pullups['PULL_UP_FG2A'] = pullups['PULL_UP_FGA'] - pullups['PULL_UP_FG3A']
+			time.sleep(.8)
+			catchSht = LeagueDashPtStats(date_from_nullable=date, date_to_nullable=date,
+									   pt_measure_type='CatchShoot', player_or_team='Player',
+										 timeout=60).get_data_frames()[0]
+			catchSht = catchSht.filter(csCols)
+			catchSht['CATCH_SHOOT_FG2M'] =  catchSht['CATCH_SHOOT_FGM'] - catchSht['CATCH_SHOOT_FG3M']
+			catchSht['CATCH_SHOOT_FG2A'] = catchSht['CATCH_SHOOT_FGA'] - catchSht['CATCH_SHOOT_FG3A']
+			time.sleep(.8)
+			passes = LeagueDashPtStats(date_from_nullable=date, date_to_nullable=date,
+									   pt_measure_type='Passing', player_or_team='Player'
+									   ,timeout=60).get_data_frames()[0]
+			passes = passes.filter(passCols)
+			games = games.merge(drives,how='left',on='TEAM_ID')
+			games = games.merge(pullups,how='left',on=mergeCols)
+			games = games.merge(catchSht,how='left',on=mergeCols)
+			games = games.merge(passes,how='left',on=mergeCols)
+			final = pd.concat([final,games])
+		return final.filter(ord)
+
+	def write_predictions(self,final, conn):
+		today = dt.datetime.today().strftime('%Y-%m-%d')
+		final['date'] = today
+		final['bet_book'] = None
+		final['final_line'] = None
+		final['bet_amount'] = None
+		final['result'] = None
+		final.rename(columns={'threesMade': 'number', 'name': 'player_id'}, inplace=True)
+		final[['player_id', 'date', 'over_under', 'number', 'prob',
+			   'DraftKings', 'FanDuel', 'TheScore_Bet',
+			   'ev_draftkings', 'ev_fanduel', 'ev_espnbet',
+			   'bet_book', 'final_line', 'bet_amount', 'result']].to_sql('predictions', self.conn, if_exists='append',
+																		 index=False)
+
+	# def run_data_update(self,yst = ):
+	# 	gids = self.get_games(yst, yst)
+	# 	self.update_player_log([yst])
+	# 	time.sleep(np.random.randint(5,15))
+	# 	try:
+	# 		self.update_shots_allowed([yst])
+	# 	except:
+	# 		print('shots not updated yet')
+	# 	time.sleep(np.random.randint(5,15))
+	# 	self.update_teamLog(gids.GAME_ID.unique())

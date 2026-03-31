@@ -16,7 +16,7 @@ SELECT
 --identifiying information
 name, teamAbrv as team,season,tmGameCt,
 --players_game
-RANK() OVER(PARTITION BY player_id,season ORDER BY game_date) plyrGameCt,
+
 
 --player demo information
 height, SUBSTR(season,1,4) - draft_year exp, 
@@ -25,7 +25,7 @@ height, SUBSTR(season,1,4) - draft_year exp,
 --first quarter player info
 --minFirst,crnFgaFirst,abvFgaFirst,
 home,plogs.*,
- 
+
 --last games played
 julianday(game_date) - game1_date - 1 daysBetweenGames,
 (
@@ -39,12 +39,11 @@ case when julianday(game_date) - game5_date < 5 then 1 else 0 end) + 1
 case when julianday(game_date) - game3_date < 3 then 1 else 0 end +
 case when julianday(game_date) - game2_date < 3 then 1 else 0 end +
 case when julianday(game_date) - game1_date < 3 then 1 else 0 end) + 1 gamesInThree,
-
+--players_game
+RANK() OVER(PARTITION BY player_id,season ORDER BY game_date) plyrGameCt,
+    
 --threes made
 coalesce(lc_fgm,0) + coalesce(rc_fgm,0) + coalesce(abv_fgm,0) as threesMade,
-SUM(coalesce(lc_fga,1) )OVER (PARTITION BY team_id, season ORDER by game_date) +
-SUM(coalesce(rc_fga,1) )OVER (PARTITION BY team_id, season ORDER by game_date) +
-SUM(coalesce(abv_fga,1) )OVER (PARTITION BY team_id, season ORDER by game_date) as teamThreesTaken,
 (coalesce(lc_fga,1) + coalesce(rc_fga,1) + coalesce(abv_fga,1)) as threesAtt,
 
 
@@ -53,12 +52,11 @@ SUM(coalesce(abv_fga,1) )OVER (PARTITION BY team_id, season ORDER by game_date) 
 coalesce(ftm,0)/coalesce(fta,1) ftPrct,
 
 -- aggregated season / rolling stats
-AVG(pts) OVER (PARTITION BY player_id,season ORDER BY game_date) curPPG,
-AVG(pts) OVER (PARTITION BY player_id ORDER BY game_date ROWS BETWEEN 83 PRECEDING and 1 PRECEDING) rolPPG,
+
 
 -- differences between team and player
 offensiveRating - teamOffRating as marginOffRating,
-pace - teamPace as marginPace,
+pace - teamPace as marginPace,teamPace,teamOffRating,mvAvgTeamPace,
 
 
 --opponent information defined in subquery below
@@ -67,11 +65,14 @@ opp_data.*
     
 from plyrLogs plogs
 LEFT JOIN 
-    (SELECT team_id,season,game_id,home,off_rate as teamOffRating,pace as teamPace,
+(SELECT team_id,season,game_id,home,offensive_rating as teamOffRating,
+    pace as teamPace,
+    AVG(pace) OVER
+    (PARTITION BY team_id,season ORDER BY game_date ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) as mvAvgTeamPace,
     RANK() OVER(PARTITION BY team_id,season ORDER BY game_date) tmGameCt 
     from teamLog) tm USING (team_id,game_id) 
 LEFT JOIN teams tms USING (team_id)
-LEFT JOIN daysSince ds USING (player_id,game_id)
 LEFT JOIN players ply USING (player_id)
+LEFT JOIN daysSince USING (player_id,game_id)
 --LEFT JOIN q1 USING (player_id,game_id)
 LEFT JOIN  opp_data on opp_data.game_id = plogs.game_id and plogs.team_id <> opp_data.opp_id

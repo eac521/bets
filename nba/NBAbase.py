@@ -14,9 +14,10 @@ class base():
                  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36'
 }
         #self.players = pd.read_sql('select * from roster_view')
-        self.teams = pd.read_sql('select team_id,teamAbrv from teams',self.conn)
+        self.teams = pd.read_sql('select cast(team_id as int) as team_id,teamAbrv from teams',self.conn)
         self.vlog = self.createVlog()
         self.vlog_r = self.createVlog(reverse=True)
+
 
 
     def createVlog(self,reverse=False):
@@ -38,7 +39,7 @@ class base():
         else:
             return '{:%Y}-{:%y}'.format(pd.to_datetime(d),pd.to_datetime(d) + pd.to_timedelta(365.25,'days'))
     
-    def insert_data(self,data,table,sort=False):
+    def insert_data(self,data,table,sort=False,verbose=True):
         '''Simply writes the data insto the table, needs to be in the correct order
         Inputs: pandas DataFrame, string of table name
         ouput: Response that table has been uploaded
@@ -55,5 +56,8 @@ class base():
             self.cur.executemany('''insert into {t} values ({v})'''.format(t=table, v=v),
                                  data.values.tolist())
         self.conn.commit()
-        return print('{} has been updated with {:,} rows'.format(table,rows))
+        if verbose:
+            return print('{} has been updated with {:,} rows'.format(table,rows))
+        else:
+            pass
         

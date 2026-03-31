@@ -3,6 +3,7 @@ import numpy as np
 import time
 import re
 from tqdm import tqdm
+from .constants import NAME_MAP
 from .NBAbase import base
 
 '''
@@ -34,6 +35,7 @@ class data(base):
         '''
 		Give a data frame with the game_date, game_id, team_id and home, then this will update the schedule to change the game for those teams
 		'''
+        adds['team_id'] = adds.team_id.astype(str)
         tcols = pd.read_sql('select * from teamLog limit 1', self.conn).columns
         # adds = season[(~season.game_id.isin(gids.GAME_ID)) & (season.game_date<=today)]
         for col in tcols:
@@ -63,21 +65,21 @@ class data(base):
 		Inputs: dataframe; with columns: player_id, newTeam, tradeDate
 		Output: None, print statement for update
 		'''
-        date = df.tradeDate.unique()[0]
-        pids = ','.join(df.player_id.unique())
-        self.cur.execute("DELETE FROM plyrLogs WHERE player_id in ({})  and game_date >= '{}' ".format(pids, date))
-        self.conn.commit()
-        # update player's schedule with new team
-        lst = df.filter(['player_id', 'newTeam', 'tradeDate']).values
-        for l in lst:
-            q = "select '{}' as player_id,team_id,game_date,game_id from teamLog where team_id = '{}' and game_date > '{}'".format(
-                *l)
-            new = pd.read_sql(q, self.conn)
-            pcols = pd.read_sql('select * from plyrLogs limit 1', self.conn).columns
-            for col in pcols:
-                if col not in new.columns:
-                    new[col] = None
-            self.insert_data(new.filter(pcols), 'plyrLogs')
+        for date in df.trade_date.unique():
+            pids = ','.join(df.player_id.unique())
+            self.cur.execute("DELETE FROM plyrLogs WHERE player_id in ({})  and game_date >= '{}' ".format(pids, date))
+            self.conn.commit()
+            # update player's schedule with new team
+            lst = df.filter(['player_id', 'new_team', 'trade_date']).values
+            for l in lst:
+                q = "select '{}' as player_id,team_id,game_date,game_id from teamLog where team_id = '{}' and game_date > '{}'".format(
+                    *l)
+                new = pd.read_sql(q, self.conn)
+                pcols = pd.read_sql('select * from plyrLogs limit 1', self.conn).columns
+                for col in pcols:
+                    if col not in new.columns:
+                        new[col] = None
+                self.insert_data(new.filter(pcols), 'plyrLogs')
 
     def threes_pipe(self, df):
         '''Will generate the data needed to generate predictions for threes
@@ -87,26 +89,26 @@ class data(base):
         crnBin = pd.read_pickle('../nba/data/model/2025-26Run/cornerBin.pickle')
         # team defense needs to be done here for all moving averages/coeff vars as it moves to player level after this.
         tmsa = self.rolling_team_sa()
-        tmsa = tmsa.join(self.weighted_moving_avg(tmsa, 5, 15, 'crn_fgallowed', 'opp_id'))
-        tmsa = tmsa.join(self.weighted_moving_avg(tmsa, 5, 15, 'abv_fgallowed', 'opp_id'))
-        tmsa = tmsa.join(self.rolling_coeffecient_var(tmsa, 5, 15, 'wide_fg3allowed', 'opp_id'))
+        tmsa = self.weighted_moving_avg(tmsa, 5, 15, 'crn_fgallowed', 'opp_id')
+        tmsa = self.weighted_moving_avg(tmsa, 5, 15, 'abv_fgallowed', 'opp_id')
+        tmsa = self.rolling_coeffecient_var(tmsa, 5, 15, 'wide_fg3allowed', 'opp_id')
         plsh = self.rolling_player_shot(df)
         final = df.merge(plsh, how='left', on=['player_id', 'game_date']).merge(tmsa, how='left',
                                                                                 on=['game_date', 'opp_id'])
         final['abv_kurtSkew'] = final.abv_fgakurt * final.abv_fgaskew
         final['crn_kurtSkew'] = final.crn_fgakurt * final.crn_fgaskew
-        final = final.join(self.weighted_moving_avg(final, 5, 15, 'crn_fga', 'player_id'))
-        final = final.join(self.weighted_moving_avg(final, 5, 15, 'abv_fga', 'player_id'))
+        final = self.weighted_moving_avg(final, 5, 15, 'crn_fga', 'player_id')
+        final = self.weighted_moving_avg(final, 5, 15, 'abv_fga', 'player_id')
         # final = final.join(self.weighted_moving_avg(final, 5, 15, 'abvFgaFirst', 'player_id'))
         # final = final.join(self.weighted_moving_avg(final, 5, 15, 'crnFgaFirst', 'player_id'))
         # final = final.join(self.weighted_moving_avg(final, 5, 15, 'minFirst', 'player_id'))
         # final = final.join(self.rolling_coeffecient_var(final, 5, 15, 'minFirst', 'player_id'))
         # final = final.join(self.rolling_coeffecient_var(final, 5, 15, 'abvFgaFirst', 'player_id'))
         # final = final.join(self.rolling_coeffecient_var(final, 5, 15, 'crnFgaFirst', 'player_id'))
-        final = final.join(self.weighted_moving_avg(final, 5, 15, 'threesMade', 'player_id'))
+        final = self.weighted_moving_avg(final, 5, 15, 'threesMade', 'player_id')
         final['cornerRatio'] = crnBin.transform(final.abv_fgaMv / (final.abv_fgaMv + final.crn_fgaMv))
-        final['crn_interaction'] = final.crn_fgaMv * final.crn_fgallowed
-        final['abv_interaction'] = final.abv_fgaMv * final.abv_fgallowed
+        final['crn_interaction'] = final.crn_fgaMv * final.crn_fgallowedMv
+        final['abv_interaction'] = final.abv_fgaMv * final.abv_fgallowedMv
         final['wide_interaction'] = final.mvAvgOppWide3 * final.mvAvgThrPtPrct
         final['crResid_interaction'] = final.cornerRatio * final.threes_residualsAllowedMv
 
@@ -157,7 +159,7 @@ class data(base):
             pdf = pdf.join(skew.reset_index(name='{}skew'.format(col)).set_index('level_1').drop('opp_id', axis=1))
             pdf = pdf.join(kurt.reset_index(name='{}kurt'.format(col)).set_index('level_1').drop('opp_id', axis=1))
             if col.find('residual')>-1:
-                pdf = pdf.join(self.weighted_moving_avg(pdf, 5, 15, col, 'opp_id'))
+                pdf = self.weighted_moving_avg(pdf, 5, 15, col, 'opp_id')
             else:
                 pass
 
@@ -196,31 +198,6 @@ class data(base):
             else:
                 print("{}:\nmissing:{:,}-{:.2%}".format(col, df[col].isna().sum()))
         return naCols
-#General functions for different transformations
-    @staticmethod
-    def weighted_moving_avg( df, min, periods, col, grping):
-        '''
-		Is an exponential moving average of a grouped feature
-		Inputs: dataframe, minimum number of periods to cover, typical number of periods, Column for exp weighting and the group by
-		Output: Dataframe with new column
-		'''
-        mvgAvg = df.groupby(grping)[col].rolling(periods, closed='left', min_periods=min,
-                                                   win_type='exponential').mean()
-        return mvgAvg.reset_index(name='{}Mv'.format(col)).set_index('level_1').drop([grping], axis=1)
-    @staticmethod
-    def rolling_coeffecient_var(df,min,periods,col,grping):
-        '''
-        Create a rolling coeffecient of variation grouped feature
-        Inputs: dataframe, minimum number of periods to cover, typical number of periods, Column for exp weighting and the group by
-        Output: Dataframe with new column
-        '''
-        df = df.fillna(0)
-        coefVar = (df.groupby(grping)[col].rolling(periods, closed='left', min_periods=min,
-                                               win_type='exponential').std()
-            /df.groupby(grping)[col].rolling(periods, closed='left', min_periods=min,
-                                                   win_type='exponential').mean())
-        return coefVar.reset_index(name='{}coefVar'.format(col)).set_index('level_1').drop([grping], axis=1)
-
 
 
     def clean_na(self, df):
@@ -229,25 +206,30 @@ class data(base):
         Inputs: the completed Threes data set with distibuition information
         Ouput: dataframe removing nans
         '''
+        #replace with team averages:
+        team_cols = [col for col in df.select_dtypes(include='number').columns if 'Opp' in col]
+        player_cols = [col for col in df.select_dtypes(include='number').columns if 'Opp' not in col]
+        df[team_cols] = df[team_cols].fillna(df[team_cols].rolling(window=10, min_periods=1).mean())
+        df[player_cols] = df[player_cols].fillna(df[player_cols].rolling(window=10, min_periods=1).mean())
         lgAvgs = pd.read_sql('''select season,
-                                       sum(open_fg3a) * 1.0 / (sum(abv_fga) + sum(lc_fga) + sum(rc_fga)) open_fg3aLgSeason,
-                                       sum(wide_fg3a) * 1.0 / (sum(abv_fga) + sum(lc_fga) + sum(rc_fga)) wide_fg3aLgSeason,
-                                       avg(pace)     as                                                  paceLgSeason,
-                                       avg(def_rate) as                                                  def_rateLgSeason
-                                from team_def
-                                group by season
-                                HAVING season is not Null
-                             ''', self.conn).set_index('season').reset_index().shift()
+                            sum(open_fg3a) * 1.0 / (sum(abv_fga) + sum(lc_fga) + sum(rc_fga)) open_fg3aLgSeason,
+                            sum(wide_fg3a) * 1.0 / (sum(abv_fga) + sum(lc_fga) + sum(rc_fga)) wide_fg3aLgSeason,
+                            avg(pace)     as                                                  paceLgSeason,
+                            avg(defensive_rating) as                                          def_rateLgSeason
+                                   from team_def
+                                   group by season
+                                   HAVING season is not Null
+                                ''', self.conn).set_index('season').reset_index().shift()
 
-        df.loc[:,'mvAvgThrees'] = df['mvAvgThrees'].fillna(df['careerAvgThrees'])
-        df.loc[:,'mvAvgUsage'] = df['mvAvgUsage'].fillna(df['careerUsage'])
-        df.loc[:,'mvAvgOffRating'] = df['mvAvgOffRating'].fillna(df['careerOffRating'])
-        df.loc[:,'mvAvgFtPrct'] = df['mvAvgFtPrct'].fillna(df['careerFtPrct'])
-        df.loc[:,'mvAvgThrPtPrct'] = df['mvAvgThrPtPrct'].fillna(df['careerThrPtPrct'])
-        df.loc[:,'seasonUsage'] = df['seasonUsage'].fillna(df['careerUsage'])
-        df.loc[:,'seasonOffRating'] = df['seasonOffRating'].fillna(df['careerOffRating'])
-        df.loc[:,'seasonFtPrct'] = df['seasonFtPrct'].fillna(df['careerFtPrct'])
-        df.loc[:,'seasonThrPtPrct'] = df['seasonThrPtPrct'].fillna(df['careerThrPtPrct'])
+        df.loc[:, 'mvAvgThrees'] = df['mvAvgThrees'].fillna(df['past3AvgThrees'])
+        df.loc[:, 'mvAvgUsage'] = df['mvAvgUsage'].fillna(df['past3Usage'])
+        df.loc[:, 'mvAvgOffRating'] = df['mvAvgOffRating'].fillna(df['past3OffRating'])
+        df.loc[:, 'mvAvgFtPrct'] = df['mvAvgFtPrct'].fillna(df['past3FtPrct'])
+        df.loc[:, 'mvAvgThrPtPrct'] = df['mvAvgThrPtPrct'].fillna(df['past3ThrPtPrct'])
+        df.loc[:, 'seasonUsage'] = df['seasonUsage'].fillna(df['past3Usage'])
+        df.loc[:, 'seasonOffRating'] = df['seasonOffRating'].fillna(df['past3OffRating'])
+        df.loc[:, 'seasonFtPrct'] = df['seasonFtPrct'].fillna(df['past3FtPrct'])
+        df.loc[:, 'seasonThrPtPrct'] = df['seasonThrPtPrct'].fillna(df['past3ThrPtPrct'])
         idx = df.index
 
         df = df.merge(lgAvgs, how='left', on=['season'])
@@ -260,6 +242,76 @@ class data(base):
         df['mvAvgOppWide3'] = df['mvAvgOppWide3'].fillna(df['wide_fg3aLgSeason'])
         df['mvAvgOppDefRating'] = df['mvAvgOppDefRating'].fillna(df['def_rateLgSeason'])
         df['seasonOppDefRating'] = df['seasonOppDefRating'].fillna(df['def_rateLgSeason'])
-        df.drop([col for col in lgAvgs.columns if col.find('LgSeason')>-1], axis=1, inplace=True)
-        df.fillna(0, inplace=True)
+        df.drop([col for col in lgAvgs.columns if col.find('LgSeason') > -1], axis=1, inplace=True)
+        ## Change to convert to a rolling mean for missing data instead of fill with 0
+        return df
+
+    def derive_opp_data_table(self):
+        self.cur.execute(open('../nba/data/sql/derive_opp_table.sql', 'r').read())
+        self.cur.execute("CREATE INDEX IF NOT EXISTS idx_opp_data ON opp_data(game_id, opp_id)")
+        self.conn.commit()
+        print('opp_table derived')
+
+    def refresh_opp_data(self):
+        """Rebuild opp_data from source tables"""
+        print("Refreshing opp_data...")
+        self.cur.execute("DROP TABLE IF EXISTS opp_data")
+        self.derive_opp_data_table()
+
+    def refresh_views(self ,view_file):
+        print("Refreshing views...")
+        self.cur.execute(open(view_file ,'r').read())
+
+
+    def reindex(self):
+        '''This will get all the existing indices and re-index them in the database
+        '''
+        q = '''SELECT name
+            FROM sqlite_master 
+            WHERE type = 'index' 
+            AND tbl_name IN ('plyrLogs', 'teamLog', 'players', 'teams','shotsAllowed')
+            AND name not like '%_autoindex_%'
+            ORDER BY tbl_name, name;'''
+        [self.cur.execute('REINDEX {}'.format(r[0])) for r in self.cur.execute(q).fetchall()]
+        return print('Updated indices')
+
+    @staticmethod
+    def standardize_names(series):
+        '''
+        Mapping name differences between how they are displayed for betting sites
+        and from the nba data
+        Inputs: Pandas Series
+        Ouput: Pandas Series
+        '''
+        series = pd.Series(np.where(series.str.contains('\.'), series.str.replace('.',''), series),index=series.index)
+        series = pd.Series(np.where(series.str.contains('ë'), series.str.replace('ë','e'), series),index=series.index)
+        series = series.replace(NAME_MAP)
+        return series
+
+    @staticmethod
+    def weighted_moving_avg(df, min, periods, col, grping):
+        '''
+        Is an exponential moving average of a grouped feature
+        Inputs: dataframe, minimum number of periods to cover, typical number of periods, Column for exp weighting and the group by
+        Output: Dataframe with new column
+        '''
+
+        df['{}Mv'.format(col)] = df.groupby(grping)[col].transform(
+            lambda x: x.rolling(periods, closed='left', min_periods=min, win_type='exponential').mean())
+        return df
+
+    @staticmethod
+    def rolling_coeffecient_var(df, min, periods, col, grping):
+        '''
+        Create a rolling coeffecient of variation grouped feature
+        Inputs: dataframe, minimum number of periods to cover, typical number of periods, Column for exp weighting and the group by
+        Output: Dataframe with new column
+        '''
+        df = df.fillna(0)
+        grping = [grping] if isinstance(grping, str) else grping
+        coefVar = (df.groupby(grping)[col].rolling(periods, closed='left', min_periods=min,
+                                                   win_type='exponential').std()
+                   / df.groupby(grping)[col].rolling(periods, closed='left', min_periods=min,
+                                                     win_type='exponential').mean()).values
+        df['{}coefVar'.format(col)] = coefVar
         return df

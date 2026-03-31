@@ -29,71 +29,28 @@ Starter has been skipped because it needs updated, will have corrected in future
 need to run some individually because running for all games is very excessive.  
 can copy and paste this in to use again, some manual processing with this 
 '''
-from nba_api.stats.endpoints import BoxScoreAdvancedV3
-temp = pd.DataFrame()
-advcols = ['GAME_ID','PLAYER_ID','offensiveRating','defensiveRating','usagePercentage','pace','possessions']
-for gid in tqdm(gd.GAME_ID.unique()):
-    advbox = BoxScoreAdvancedV3(gid).get_data_frames()[0].rename(columns={'gameId':'GAME_ID','personId':'PLAYER_ID'})
-    advbox = advbox.filter(advcols)
-    temp = pd.concat([temp,advbox])
-shts = pd.DataFrame()
-for date in tqdm(gds.GAME_DATE.unique()):
-    d = pd.to_datetime(date)
-    season = '{}-{}'.format(d.year,str(d.year+1)[-2:]) if d.month>=10 else '{}-{}'.format(d.year-1,str(d.year)[-2:])
-    tempsht = LeagueDashPlayerShotLocations(date_from_nullable = date,
-                                 date_to_nullable = date,
-                                     season=season).get_data_frames()[0]
-    
-    tempsht = nba.clean_shotcolumns(tempsht)
-    tempsht['GAME_DATE'] = date
-    shts = pd.concat([shts,tempsht])
-    if np.random.randint(0,100) % 5 == 0:
-        time.sleep(np.random.choice(range(7,22)))
+# log = etl.get_logs(g.GAME_DATE.unique())
+# rbs  = pd.DataFrame()
+# for d in g.GAME_DATE.unique():
+#     temp = etl.get_rebounds([d])
+#     rbs = pd.concat([rbs,temp])
+# shts = etl.get_player_shot_spots(g.GAME_DATE.unique())
+# from nba_api.stats.endpoints import BoxScoreAdvancedV3
+# temp = pd.DataFrame()
+# advcols = ['GAME_ID','PLAYER_ID','offensiveRating','defensiveRating','usagePercentage','pace','possessions']
+# for gid in tqdm(g.GAME_ID.unique()):
+#     advbox = BoxScoreAdvancedV3(gid).get_data_frames()[0].rename(columns={'gameId':'GAME_ID','personId':'PLAYER_ID'})
+#     advbox = advbox.filter(advcols)
+#     temp = pd.concat([temp,advbox])
+# #fbckt = etl.get_first_buckets(g.GAME_DATE.unique())
+# adds = final[final.PLAYER_ID.isin([1630557, 203468, 1629027])]
+# adds['Starter'] = 0
 
-l = []
-for ct,gameid in enumerate(tqdm(gd.GAME_ID.unique())):
-    df = PlayByPlayV2(gameid).get_data_frames()[0]
-    try:
-        aind = df[(df.EVENTMSGTYPE==1) & (df.HOMEDESCRIPTION.notna())].PLAYER1_ID.values[0]
-        aev = df[(df.EVENTMSGTYPE==1) & (df.PLAYER1_ID==aind)].EVENTNUM.min()
-        hind = df[(df.EVENTMSGTYPE==1) & (df.VISITORDESCRIPTION.notna())].PLAYER1_ID.values[0]
-        hev = df[(df.EVENTMSGTYPE==1) & (df.PLAYER1_ID==hind)].EVENTNUM.min()
-        gd = {'gameid':gameid,'homePlayer':hind,
-              'awayPlayer':aind,
-              'firstPlayer':aind if aev < hev else hind}
-        bskts = set([(gd['gameid'],v,1,1)  if list(gd.values()).count(v) ==2 else (gd['gameid'],v,1,0) for k,v in gd.items() if k!='gameid'])
-    except:
-        gd = {'gameid':gameid,'homePlayer':'999',
-              'awayPlayer':'999',
-              'firstPlayer':'999'}
-        bskts = set([(gd['gameid'],v,1,1)  if list(gd.values()).count(v) ==2 else (gd['gameid'],v,1,0) for k,v in gd.items() if k!='gameid'])
-    #bdf = pd.DataFrame(bskts,columns = ['GAME_ID','PLAYER_ID','teamFirst','gameFirst'])
-    l.append(bskts)
-    time.sleep(np.random.choice(range(1,5)))
 
-fbckt = pd.DataFrame([x for y in l for x in y],columns = ['GAME_ID','PLAYER_ID','team_first','game_first'])
-#log = nba.get_logs(gd,['2021-22','2022-23','2023-24','2024-25']) #has all 4
-
-#rbs = nba.get_rebounds(gd) #all 4
-
-#merge dataframes together
 logrbs = log.merge(rbs,how='left',on=['PLAYER_ID','GAME_ID','TEAM_ID','GAME_DATE']).fillna(0)
 logRbsSht = logrbs.merge(shts,how='left',on=['TEAM_ID','PLAYER_ID','GAME_DATE'])
-advBskt = adv.merge(fbckt,how='left',on = ['PLAYER_ID','GAME_ID'])
+advBskt = temp.merge(fbckt,how='left',on = ['PLAYER_ID','GAME_ID'])
 final = logRbsSht.merge(advBskt,how='left',on=['PLAYER_ID','GAME_ID'])
-final['Starter'] = 0
-
-final.columns = ['player_id','team_id','game_id','game_date','min','ftm','fta','reb','ast','tov','stl','blk','blka','pf',
- 'pfd','pts','plus_minus','dd2','td3','oreb','oreb_contest','oreb_chances','oreb_chance_defer','avg_oreb_dist','dreb',
- 'dreb_contest','dreb_chances','dreb_chance_defer','avg_dreb_dist','ra_fgm','ra_fga', 'paint_fgm', 'paint_fga','mid_fgm',
- 'mid_fga', 'lc_fgm','lc_fga', 'rc_fgm','rc_fga','abv_fgm', 'abv_fga', 'offensiveRating','defensiveRating',
- 'usagePercentage', 'pace', 'possessions','team_first', 'game_first','Starter']
-final = final[(final.game_date<='2025-02-02') & (final.player_id.isin([1631108, 203076, 1629029, 1628467]))].filter(pd.read_sql('select * from plyrLogs limit 1',nba.conn).columns.values)
-# if (pd.read_sql("select count(*) as ct  from plyrLogs where game_date in ({})".format(strD,strD),nba.conn).sum()>0).all():
-#     nba.conn.execute("DELETE FROM plyrLogs where game_date in ({})".format(strD))
-#     nba.conn.commit()
-nba.insert_data(final,'plyrLogs')
-
 
 ### find what wasserstein scoring looks like for first 5,10,15,20 games compared to the preseason historicals
 def wasDistance()
@@ -170,3 +127,56 @@ seasAvg = tm.groupby('season')[col].quantile([1/6,1/3,.5,2/3,5/6,1],'midpoint').
 #Pulling in if someone is a startrer
 temp = pd.concat(GameRotation(gid).get_data_frames())
 d[gid] = temp[temp.IN_TIME_REAL==0].PERSON_ID.values.tolist()
+
+## I changed the play by play for first baskets but here is the og
+aind = df[(df.EVENTMSGTYPE==1) & (df.HOMEDESCRIPTION.notna())].PLAYER1_ID.values[0]
+aev = df[(df.EVENTMSGTYPE==1) & (df.PLAYER1_ID==aind)].EVENTNUM.min()
+hind = df[(df.EVENTMSGTYPE==1) & (df.VISITORDESCRIPTION.notna())].PLAYER1_ID.values[0]
+hev = df[(df.EVENTMSGTYPE==1) & (df.PLAYER1_ID==hind)].EVENTNUM.min()
+
+def get_new_cup_games():
+    url = "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2.json"
+    response = requests.get(url)
+    schedule_data = response.json()
+    cup = ['12/09/2025 00:00:00', '12/10/2025 00:00:00', '12/11/2025 00:00:00', '12/12/2025 00:00:00',
+           '12/13/2025 00:00:00', '12/14/2025 00:00:00'
+        , '12/15/2025 00:00:00']
+    h = [[pd.to_datetime(d.get('gameDate')).strftime('%Y-%m-%d'), i.get('gameId'), i.get('homeTeam').get('teamId'), 1]
+         for d in schedule_data.get('leagueSchedule').get('gameDates') for i in d.get('games')
+         if d.get('gameDate') in cup]
+    a = [[pd.to_datetime(d.get('gameDate')).strftime('%Y-%m-%d'), i.get('gameId'), i.get('awayTeam').get('teamId'), 0]
+         for d in schedule_data.get('leagueSchedule').get('gameDates') for i in d.get('games')
+         if d.get('gameDate') in cup]
+
+    # log = etl.get_logs(g.GAME_DATE.unique())
+    # rbs  = pd.DataFrame()
+    # for d in g.GAME_DATE.unique():
+    #     temp = etl.get_rebounds([d])
+    #     rbs = pd.concat([rbs,temp])
+    # shts = etl.get_player_shot_spots(g.GAME_DATE.unique())
+    # from nba_api.stats.endpoints import BoxScoreAdvancedV3
+    # temp = pd.DataFrame()
+    # advcols = ['GAME_ID','PLAYER_ID','offensiveRating','defensiveRating','usagePercentage','pace','possessions']
+    # for gid in tqdm(g.GAME_ID.unique()):
+    #     advbox = BoxScoreAdvancedV3(gid).get_data_frames()[0].rename(columns={'gameId':'GAME_ID','personId':'PLAYER_ID'})
+    #     advbox = advbox.filter(advcols)
+    #     temp = pd.concat([temp,advbox])
+    # #fbckt = etl.get_first_buckets(g.GAME_DATE.unique())
+
+    logrbs = log.merge(rbs, how='left', on=['PLAYER_ID', 'GAME_ID', 'TEAM_ID', 'GAME_DATE']).fillna(0)
+    logRbsSht = logrbs.merge(shts, how='left', on=['TEAM_ID', 'PLAYER_ID', 'GAME_DATE'])
+    advBskt = temp.merge(fbckt, how='left', on=['PLAYER_ID', 'GAME_ID'])
+    adds = logRbsSht.merge(advBskt, how='left', on=['PLAYER_ID', 'GAME_ID'])
+    adds = adds[adds.PLAYER_ID.isin([1629027, 1630557, 203468])]
+    adds['Starter'] = 0
+    adds.columns = ['player_id', 'team_id', 'game_id', 'game_date', 'min', 'ftm', 'fta',
+                    'reb', 'ast', 'tov', 'stl', 'blk', 'blka', 'pf', 'pfd', 'pts',
+                    'plus_minus', 'dd2', 'td3', 'oreb', 'oreb_contest', 'oreb_chances', 'oreb_chance_defer',
+                    'avg_oreb_dist', 'dreb', 'dreb_contest', 'dreb_chances',
+                    'dreb_chance_defer', 'avg_dreb_dist', 'ra_fgm', 'ra_fga', 'paint_fga',
+                    'paint_fgm', 'mid_fgm', 'mid_fga', 'lc_fgm', 'lc_fga', 'rc_fgm',
+                    'rc_fga', 'abv_fgm', 'abv_fga', 'offensiveRating',
+                    'defensiveRating', 'usagePercentage', 'pace', 'possessions',
+                    'team_first', 'game_first', 'Starter']
+    f = adds.dropna(axis=1, how='all').merge(shts, how='left', left_on=['player_id', 'game_date'],
+                                             right_on=['PLAYER_ID', 'GAME_DATE'])
