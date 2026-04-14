@@ -1,6 +1,8 @@
 import sqlite3
 import pandas as pd
 from matplotlib.colors import LinearSegmentedColormap
+import logging
+logger = logging.getLogger(__name__)
 class base():
 
 
@@ -57,7 +59,7 @@ class base():
                                  data.values.tolist())
         self.conn.commit()
         if verbose:
-            return print('{} has been updated with {:,} rows'.format(table,rows))
+            return logger.info("{} has been updated with {:,} rows".format(table, rows))
         else:
             pass
         

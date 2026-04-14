@@ -13,7 +13,8 @@ class models(base):
             'threes': {
                 'model_path': '../nba/data/model/2025-26Run/threeModel.pkl',
                 'scaler_path': '../nba/data//model/2025-26Run/scaler.pkl',
-                'data_path': '../nba/data/sql/threeRunQ.sql'
+                'data_path': '../nba/data/sql/threeRunQ.sql',
+                'pipe:':data.threes_pipe()
             },
             'points': {
                 'model_path': '../nba/data/model/pointsModel.pkl',

@@ -2,9 +2,10 @@ import json
 import requests
 import pandas as pd
 import numpy as np
-from itertools import combinations
 import os
 import datetime as dt
+from itertools import combinations
+from constants import books
 '''
 Creating general betting functions that will be shared between NFL and NBA
 '''
@@ -21,13 +22,18 @@ class odds():
         self.budget = 1000
         self.kellyVal = .125
         self.parlayBudget = 750
-        self.market_vars =  {
-        'threes': {'url':'https://api.the-odds-api.com/v4/sports/basketball_nba/events/{}/odds?apiKey={}&regions=us&markets=player_threes,player_threes_alternate&dateFormat=iso&oddsFormat=american&bookmakers=draftkings%2Cfanduel%2cespnbet',
-                   'col_name':'threesMade'
-                   },
-        'points': {'url':'https://api.the-odds-api.com/v4/sports/basketball_nba/events/{}/odds?apiKey={}&regions=us&markets=player_points,player_points_alternate&dateFormat=iso&oddsFormat=american&bookmakers=draftkings%2Cfanduel%2cespnbet',
-                   'col_name':'pointsScored'
-        }
+        self.base_url = 'https://api.the-odds-api.com/v4/sports/{sport}/events/{{}}/odds?apiKey={{}}&regions=us&markets={markets}&dateFormat=iso&oddsFormat=american&bookmakers={books}'
+        self.market_vars = {
+            'threes': {
+                'sport':'basketball_nba',
+                'markets': 'player_threes,player_threes_alternate',
+                'col_name': 'threesMade',
+                'eventURL':self.nbaEvents},
+            'points':{
+                'sport': 'basketball_nba',
+                'markets': 'player_points,player_points_alternate',
+                'col_name': 'pointsScored',
+                'eventURL':self.nbaEvents}
         }
     def oddsData(self, eventURL,usePaid=False):
         '''
@@ -84,10 +90,12 @@ class odds():
         return final
 
     def fetch_odds(self,market):
-        url = self.market_vars.get(market).get('url')
+        url = self.build_odds_url(market)
         col = self.market_vars.get(market).get('col_name')
+        eventURL = self.market_vars.get(market).get('eventURL')
         df = pd.DataFrame()
-        events, akey = self.oddsData(self.nbaEvents, usePaid=True)
+        events, akey = self.oddsData(eventURL, usePaid=True)
+        l = []
         for event in events:
             r = requests.get(url.format(event, akey))
             game = r.json()
@@ -97,32 +105,25 @@ class odds():
                     temp = pd.DataFrame(mrkt.get('outcomes'))
                     temp.columns = ['over_under', 'name', 'price', self.market_vars.get(market).get('col_name')]
                     temp['book'] = bk
-                    df = pd.concat([temp, df])
+                    l.append(temp)
+        pd.concat(l)
         odf = df.pivot_table(index=['name', col, 'over_under'], columns=['book']).reset_index()
-        odf.columns = [col[1] if col[1] != '' else col[0] for col in odf.columns]
+        odf.columns = [c[1] if c[1] != '' else c[0] for c in odf.columns]
         return odf
 
-    def bet_table(self,overs, odf, val_col):
-        '''
-        expects a dataframe with espn(theScore Bet), Draftkings and FanDuel lines and a dataframe with predicted values.
-        Creates a merged dataframe that gives bet amount and EV
-        '''
+    def bet_table(self, overs, odf, val_col, sportsbooks=None):
+        bks = sportsbooks or ['draftkings', 'fanduel', 'espnbet']
+        active = {k: v for k, v in books.items() if k in bks}
         final = odf.merge(overs, how='left', on=['name', val_col, 'over_under'])
         final['prob'] = np.where(final.value < 0, round(abs(final.value) / (abs(final.value) + 100), 4),
                                  round(100 / (final.value + 100), 4))
-        espnKelly = [self.kellyCrit(p,odd,False) for p,odd in zip(final.prob,final['theScore Bet'])]
-        fdKelly = [self.kellyCrit(p,odd,False) for p,odd in zip(final.prob,final['FanDuel'])]
-        dkKelly = [self.kellyCrit(p,odd,False) for p,odd in zip(final.prob,final['DraftKings'])]
-        final['DKEV'] = ['{:.2%}'.format(self.ev(p, odd)) for p, odd in zip(final.prob, final.DraftKings.replace(0, 1))]
-        final['FanDuelEV'] = ['{:.2%}'.format(self.ev(p, odd)) for p, odd in
-                              zip(final.prob, final.FanDuel.replace(0, 1))]
-        # final['BetMGMEV'] = ['{:.2%}'.format(self.ev(p, odd))  for p,odd in zip(final.prob,final.BetMGM)]
-        final['espnEV'] = ['{:.2%}'.format(self.ev(p, odd)) for p, odd in zip(final.prob, final['theScore Bet'])]
-        # first row needs to be the tiebreaker row
-        final['FanDuelAmount'] = [round(x * self.budget * self.kellyVal, 2) for x in fdKelly]
-        final['DraftKingsAmount'] = [round(x * self.budget * self.kellyVal, 2) for x in dkKelly]
-        # final['BetMGMAmount'] = [round(x * self.budget * self.kellyVal,2) for x in final.BetMGMKelly.values]
-        final['theScore BetAmount'] = [round(x * self.budget * self.kellyVal, 2) for x in espnKelly]
+        for book, meta in active.items():
+            odds_col = meta['odds_col']
+            prefix = meta['col_prefix']
+            kelly = [self.kellyCrit(p, odd, False) for p, odd in zip(final.prob, final[odds_col])]
+            final['{}EV'.format(prefix)] = ['{:.2%}'.format(self.ev(p, odd)) for p, odd in
+                                            zip(final.prob, final[odds_col].replace(0, 1))]
+            final['{}Amount'.format(prefix)] = [round(x * self.budget * self.kellyVal, 2) for x in kelly]
         return final
 
     def twoWayOdds(self,df,numCol,book):
@@ -144,6 +145,13 @@ class odds():
         grouped['fair_under_odds_{}'.format(book)] = grouped['under_odds_pct'] / (grouped['over_odds_pct'] + grouped['under_odds_pct'])
         return grouped[['name',numCol,'fair_over_odds_{}'.format(book),'fair_under_odds_{}'.format(book),'{}Vig'.format(book)]]
 
+    def build_odds_url(self, market, sportsbooks=None):
+        books = books if sportsbooks is None else sportsbooks
+        return self.base_url.format(
+            sport=self.market_vars[market]['sport'],
+            markets=self.market_vars[market]['markets'],
+            books='%2c'.join(books)
+        )
 
     @staticmethod
     def convertPercentToOdds(x):

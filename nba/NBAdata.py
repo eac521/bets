@@ -5,6 +5,8 @@ import re
 from tqdm import tqdm
 from .constants import NAME_MAP
 from .NBAbase import base
+import logging
+logger = logging.getLogger(__name__)
 
 '''
 This class is focused on what is already load via the nba api and stored in our database.
@@ -247,10 +249,13 @@ class data(base):
         return df
 
     def derive_opp_data_table(self):
+        pre_count = pd.read_sql("SELECT COUNT(*) as ct FROM team_def", self.conn).iloc[0, 0]
+        logger.info("derive_opp_data: team_def has {} rows".format(pre_count))
         self.cur.execute(open('../nba/data/sql/derive_opp_table.sql', 'r').read())
         self.cur.execute("CREATE INDEX IF NOT EXISTS idx_opp_data ON opp_data(game_id, opp_id)")
         self.conn.commit()
-        print('opp_table derived')
+        post_count = pd.read_sql("SELECT COUNT(*) as ct FROM opp_data", self.conn).iloc[0, 0]
+        logger.info("derive_opp_data: opp_data materialized with {} rows".format(post_count))
 
     def refresh_opp_data(self):
         """Rebuild opp_data from source tables"""
@@ -283,8 +288,8 @@ class data(base):
         Inputs: Pandas Series
         Ouput: Pandas Series
         '''
-        series = pd.Series(np.where(series.str.contains('\.'), series.str.replace('.',''), series),index=series.index)
-        series = pd.Series(np.where(series.str.contains('ë'), series.str.replace('ë','e'), series),index=series.index)
+        series = series.str.replace('.','',regex=True)
+        series = series.str.replace('ë','e',regex=True)
         series = series.replace(NAME_MAP)
         return series
 
