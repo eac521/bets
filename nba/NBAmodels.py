@@ -14,7 +14,6 @@ class models(base):
                 'model_path': '../nba/data/model/2025-26Run/threeModel.pkl',
                 'scaler_path': '../nba/data//model/2025-26Run/scaler.pkl',
                 'data_path': '../nba/data/sql/threeRunQ.sql',
-                'pipe:':data.threes_pipe()
             },
             'points': {
                 'model_path': '../nba/data/model/pointsModel.pkl',
@@ -91,7 +90,7 @@ class models(base):
         for col in df.columns:
             try:
                 df[col] = (df[col] - self.scaler.get(col).get('center')) / self.scaler.get(col).get('var')
-            except:
+            except AttributeError:
                 pass
         return df
 
@@ -106,3 +105,23 @@ class models(base):
     def ohe_overs(actuals):
         mx = max(actuals)
         return np.array([[1] * (y + 1) + [0] * (mx - y) for y in actuals])
+
+
+
+    def run_model(self, model_name,date=None):
+        '''
+        Run function for the model, this will get the model and produce the predictions both in a long and wide format
+        inputs: model name, date that defaults to today
+        ouput: long and wide dataframes of predicitons for the day
+        '''
+        date =  date or (dt.datetime.today() + pd.to_timedelta(-1, unit='day')).strftime(format='%Y-%m-%d')
+        model = NBAmodels.models(model_name)
+        pipe = model.get(pipe)
+        td = pipe(model.data)
+        td = data.clean_na(td)
+        td = td[td.game_date == date]
+        td = model.standRobust_scaler(td)
+        preds = model.model.predict(sm.add_constant(td.filter(model.features), has_constant='add'))
+        idInfo = model.data[model.data.game_date == date][['name','team','game_id']]
+        idInfo.name = data.standardize_names(idInfo.name)
+        return odds.oddsTable(preds, idInfo,odds.market_vars.get(model_name).get('col_name')),idInfo

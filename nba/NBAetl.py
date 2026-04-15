@@ -442,7 +442,7 @@ class etl(base):
 				logger.warning("{}: API Timeout - skipping".format(date))
 			except (KeyError, ValueError) as e:
 				logger.warning("{}: merge failed, missing tracking data - {}".format(date,e))
-			except request.exceptions.HTTPError as e:
+			except requests.exceptions.HTTPError as e:
 				logger.warning("{}: HTTP error - {}".format(date,e))
 		final = pd.concat(games) if games else pd.DataFrame()
 		return final
@@ -654,7 +654,7 @@ class etl(base):
 					'awayPlayer':aind,
 					'firstPlayer':aind if aev < hev else hind}
 				bskts = set([(gd['gameid'],v,1,1)  if list(gd.values()).count(v) ==2 else (gd['gameid'],v,1,0) for k,v in gd.items() if k!='gameid'])
-			except:
+			except IndexError:
 				gd = {'gameid':gameid,'homePlayer':'999',
 					'awayPlayer':'999',
 					'firstPlayer':'999'}
@@ -682,8 +682,9 @@ class etl(base):
 		   'PASSES_RECEIVED', 'FT_AST', 'SECONDARY_AST', 'POTENTIAL_AST',
 		   'AST_PTS_CREATED', 'AST_ADJ']
 			mergeCols = ['PLAYER_ID','TEAM_ID']
-			final = pd.DataFrame()
+			l = [[]
 			for date in tqdm(game_dates):
+
 				season = self.derive_season(date)
 				games = self.create_opp_games([date])
 				drives = LeagueDashPtStats(date_from_nullable = date,date_to_nullable = date,season=season,
@@ -712,8 +713,8 @@ class etl(base):
 				games = games.merge(pullups,how='left',on=mergeCols)
 				games = games.merge(catchSht,how='left',on=mergeCols)
 				games = games.merge(passes,how='left',on=mergeCols)
-			final = pd.concat([final,games])
-
+				l.append(games)
+			final = pd.concat(l)
 			logger.info("{}: loaded {} player tracking rows".format(date, len(games)))
 
 		except (KeyError, ValueError) as e:
