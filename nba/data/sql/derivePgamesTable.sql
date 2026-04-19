@@ -1,7 +1,7 @@
 -- with teamInfo as (
 --     SELECT sum(abv_fga) as teamAbvFga, sum(crn_fga) as teamCrnFga, sum(ra_fga) as teamRaFga, sum(mid_fga) as teamMidFga, sum(paint_fga) as teamPaintFga, 
 
-CREATE VIEW pgames 
+CREATE TABLE NOT EXISTS pgames
     AS
 WITH daysSince AS (
     SELECT player_id,game_id,
