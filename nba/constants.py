@@ -7,3 +7,16 @@ NAME_MAP = {
     'Isaiah Stewart': 'Isaiah Stewart II',
     'Ronald Holland II': 'Ron Holland',
 }
+derived_tables = {
+    'opp_data': {
+        'file': 'nba/data/sql/opp_data.sql',
+        'indexes': [('idx_opp_data', 'game_id, opp_id')]
+    },
+    'pgames': {
+        'file': 'nba/data/sql/derivPgamesTable.sql',
+        'indexes': [
+            ('idx_pgames_player_season_date', 'player_id, season, game_date'),
+            ('idx_pgames_player_date', 'player_id, game_date')
+        ]
+    }
+}

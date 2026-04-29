@@ -3,7 +3,7 @@ import numpy as np
 import time
 import re
 from tqdm import tqdm
-from .constants import NAME_MAP
+from .constants import NAME_MAP, derived_tables
 from .NBAbase import base
 import logging
 logger = logging.getLogger(__name__)
@@ -248,20 +248,29 @@ class data(base):
         ## Change to convert to a rolling mean for missing data instead of fill with 0
         return df
 
-    def derive_opp_data_table(self):
-        pre_count = pd.read_sql("SELECT COUNT(*) as ct FROM team_def", self.conn).iloc[0, 0]
-        logger.info("derive_opp_data: team_def has {} rows".format(pre_count))
-        self.cur.execute(open('../nba/data/sql/derive_opp_table.sql', 'r').read())
-        self.cur.execute("CREATE INDEX IF NOT EXISTS idx_opp_data ON opp_data(game_id, opp_id)")
-        self.conn.commit()
-        post_count = pd.read_sql("SELECT COUNT(*) as ct FROM opp_data", self.conn).iloc[0, 0]
-        logger.info("derive_opp_data: opp_data materialized with {} rows".format(post_count))
+    def derive_tables(self):
+        for table_name in derived_tables.keys():
+            try:
+                pre_count = pd.read_sql("SELECT COUNT(*) as ct FROM {}".format(table_name), self.conn).iloc[0, 0]
+            except Exception:
+                pre_count = 0
+            logger.info("derive {}: {} has {} rows".format(table_name,table_name, pre_count))
+            with open(derived_tables.get(table_name).get('file')) as f:
+                self.cur.execute(f.read())
+            for idx_name, idx_cols in derived_tables.get(table_name).get('indexes'):
+                self.cur.execute("CREATE INDEX IF NOT EXISTS {} ON {}({})".format(idx_name, table_name, idx_cols))
+            self.conn.commit()
+            post_count = pd.read_sql("SELECT COUNT(*) as ct FROM {}".format(table_name), self.conn).iloc[0, 0]
+            logger.info("derive {}: {} materialized with {} rows".format(table_name,table_name,post_count))
 
-    def refresh_opp_data(self):
+
+    def refresh_materialized_tables(self):
         """Rebuild opp_data from source tables"""
-        print("Refreshing opp_data...")
+        print("Refreshing opp_data and pgames...")
         self.cur.execute("DROP TABLE IF EXISTS opp_data")
         self.derive_opp_data_table()
+        self.cur.execute("DROP TABLE IF EXISTS pgames")
+        self.derive_pgames_table()
 
     def refresh_views(self ,view_file):
         print("Refreshing views...")
@@ -288,8 +297,8 @@ class data(base):
         Inputs: Pandas Series
         Ouput: Pandas Series
         '''
-        series = series.str.replace('.','',regex=True)
-        series = series.str.replace('ë','e',regex=True)
+        series = series.str.replace('.','')
+        series = series.str.replace('ë','e')
         series = series.replace(NAME_MAP)
         return series
 

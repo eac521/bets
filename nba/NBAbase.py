@@ -50,12 +50,13 @@ class base():
         # PRAGMA table_info({})
         # '''.format(table),self.conn).name.values
         rows = data.shape[0]
-        v = '?' + ',?' * (data.shape[1] -1)
         if sort:
             ord = [col[0] for col in self.cur.execute('select * from {} limit 1'.format(table)).description]
-            self.cur.executemany('''insert into {t} values ({v})'''.format(t=table,v=v),data.filter(ord).values.tolist())
+            v = '?' + ',?' * (len(ord) - 1)
+            self.cur.executemany('''insert or replace into {t} values ({v})'''.format(t=table,v=v),data.filter(ord).values.tolist())
         else:
-            self.cur.executemany('''insert into {t} values ({v})'''.format(t=table, v=v),
+            v = '?' + ',?' * (data.shape[1] - 1)
+            self.cur.executemany('''insert or replace into {t} values ({v})'''.format(t=table, v=v),
                                  data.values.tolist())
         self.conn.commit()
         if verbose:

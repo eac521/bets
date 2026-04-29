@@ -4,13 +4,14 @@ import pandas as pd
 import numpy as np
 import os
 import datetime as dt
+import re
 from itertools import combinations
-from constants import books
+from betting.constants import books
 '''
 Creating general betting functions that will be shared between NFL and NBA
 '''
 class odds():
-    
+
     def __init__(self,configPath=os.path.join(os.path.dirname(__file__), 'config.json')):
         self.dct = json.loads(open(configPath,'r').read())
         self.freeApi = self.dct.get('oddsApi').get('free')
@@ -22,17 +23,16 @@ class odds():
         self.budget = 1000
         self.kellyVal = .125
         self.parlayBudget = 750
+        self.unit = self.budget * .01
         self.base_url = 'https://api.the-odds-api.com/v4/sports/{sport}/events/{{}}/odds?apiKey={{}}&regions=us&markets={markets}&dateFormat=iso&oddsFormat=american&bookmakers={books}'
         self.market_vars = {
             'threes': {
                 'sport':'basketball_nba',
                 'markets': 'player_threes,player_threes_alternate',
-                'col_name': 'threesMade',
                 'eventURL':self.nbaEvents},
             'points':{
                 'sport': 'basketball_nba',
                 'markets': 'player_points,player_points_alternate',
-                'col_name': 'pointsScored',
                 'eventURL':self.nbaEvents}
         }
     def oddsData(self, eventURL,usePaid=False):
@@ -50,9 +50,9 @@ class odds():
             r = requests.get(eventURL.format(self.freeApi,self.todayISO,self.tomorISO))
             print('Free:',r.headers)
             key = self.freeApi
-        
+
         return [d['id'] for d in r.json()],key
-    
+
 
     def kellyCrit(self,prob,odds,show=True):
         '''
@@ -77,21 +77,20 @@ class odds():
             .reshape(df[order].shape),columns=order, index=df.index)
         return final
 
-    def oddsTable(self,preds,idInfo,col):
+    def oddsTable(self,preds,idInfo):
         finalo = self.accumulateOdds(preds,preds.columns[::-1])
         finalu = self.accumulateOdds(preds,preds.columns)
-        overs = idInfo.join(finalo.filter(preds.columns)).melt(id_vars = ['name','team'],value_vars = preds.columns, var_name = col)
-        unders = idInfo.join(finalu.filter(preds.columns)).melt(id_vars = ['name','team'],value_vars = preds.columns, var_name = col)
-        unders['over_under'] = 'Under'
-        overs['over_under'] = 'Over'
+        finalu['over_under'] = 'Under'
+        finalo['over_under'] = 'Over'
+        overs = idInfo.join(finalo).melt(id_vars = ['name','team','player_id','over_under'],value_vars = preds.columns, var_name = 'number')
+        unders = idInfo.join(finalu).melt(id_vars = ['name','team','player_id','over_under'],value_vars = preds.columns, var_name = 'number')
         final = pd.concat([overs, unders])
-        final.threesMade = np.where(final.over_under=='Over',final[col]-.5, final[col] +.5)
-        final = final[final[col]>0]
+        final['number'] = np.where(final.over_under=='Over',final['number']-.5, final['number'] +.5)
+        final = final[final['number']>0]
         return final
 
     def fetch_odds(self,market):
         url = self.build_odds_url(market)
-        col = self.market_vars.get(market).get('col_name')
         eventURL = self.market_vars.get(market).get('eventURL')
         df = pd.DataFrame()
         events, akey = self.oddsData(eventURL, usePaid=True)
@@ -103,18 +102,18 @@ class odds():
                 bk = key.get('title')
                 for mrkt in key.get('markets'):
                     temp = pd.DataFrame(mrkt.get('outcomes'))
-                    temp.columns = ['over_under', 'name', 'price', self.market_vars.get(market).get('col_name')]
+                    temp.columns = ['over_under', 'name', 'price', 'number']
                     temp['book'] = bk
                     l.append(temp)
         pd.concat(l)
-        odf = df.pivot_table(index=['name', col, 'over_under'], columns=['book']).reset_index()
+        odf = df.pivot_table(index=['name', 'number', 'over_under'], columns=['book']).reset_index()
         odf.columns = [c[1] if c[1] != '' else c[0] for c in odf.columns]
         return odf
 
-    def bet_table(self, overs, odf, val_col, sportsbooks=None):
+    def bet_table(self, overs, odf, sportsbooks=None):
         bks = sportsbooks or ['draftkings', 'fanduel', 'espnbet']
         active = {k: v for k, v in books.items() if k in bks}
-        final = odf.merge(overs, how='left', on=['name', val_col, 'over_under'])
+        final = overs.merge(odf, how='left', on=['name', 'number', 'over_under'])
         final['prob'] = np.where(final.value < 0, round(abs(final.value) / (abs(final.value) + 100), 4),
                                  round(100 / (final.value + 100), 4))
         for book, meta in active.items():
@@ -124,7 +123,9 @@ class odds():
             final['{}EV'.format(prefix)] = ['{:.2%}'.format(self.ev(p, odd)) for p, odd in
                                             zip(final.prob, final[odds_col].replace(0, 1))]
             final['{}Amount'.format(prefix)] = [round(x * self.budget * self.kellyVal, 2) for x in kelly]
-        return final
+        amts = [col for col in final.columns if re.search('Amount$',col)!=None]
+        f = final[(final[amts]>self.unit/2).any(axis=1)]
+        return f
 
     def twoWayOdds(self,df,numCol,book):
         '''

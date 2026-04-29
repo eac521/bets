@@ -49,17 +49,21 @@ def run_model(model_name,date=None):
     td = td[td.game_date == date]
     td = model.standRobust_scaler(td)
     preds = model.model.predict(sm.add_constant(td.filter(model.features), has_constant='add'))
-    idInfo = model.data[model.data.game_date == date][['name','team','game_id']]
-    idInfo.name = data.standardize_names(idInfo.name)
-    return od.oddsTable(preds, idInfo,od.market_vars.get(model_name).get('col_name')),idInfo
+    idInfo = model.data[model.data.game_date == date][['name','player_id','team','game_id']].copy()
+    idInfo['name'] = data.standardize_names(idInfo['name'])
 
+    return od.oddsTable(preds, idInfo),idInfo
+
+#I dont know that this is needed because we are going to use run model and then I dont want all the pieces connected here
+def run_pipeline():
+    data_pull()
+    overs, idInfo = run_model(args.model)
+    odf = od.fetch_odds(args.model)
+    final = od.bet_table(overs, odf)
+    return final
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', required=True)
     args = parser.parse_args()
-
-    data_pull()
-    overs, idInfo = run_model(args.model)
-    odf = od.fetch_odds(args.model)
-    final = od.bet_table(overs, odf, od.market_vars.get(args.model).get('col_name'))
+    run_pipeline()

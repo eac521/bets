@@ -87,7 +87,7 @@ class models(base):
         Inputs: DataFrame and dictionary
         Output: New scaled DataFrame
         '''
-        for col in df.columns:
+        for col in self.features[1:]:
             try:
                 df[col] = (df[col] - self.scaler.get(col).get('center')) / self.scaler.get(col).get('var')
             except AttributeError:
