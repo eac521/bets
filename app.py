@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 USERS = ['EAC', 'larBear']
 BOOKS = ['FanDuel', 'DraftKings', 'ESPNBet']
+MODEL_NAME = ['threes']
 
 st.set_page_config(page_title='NBA Betting Dashboard', layout='wide')
 
@@ -58,17 +59,19 @@ st.title('Bets to Place')
 
 
 @st.cache_data(ttl=300)
-def create_todays_bets(model_name,date=None):
+def create_todays_bets(MODEL_NAME,date=None,value=0):
     """
-    Load today's actionable predictions from SQLite.
+    This will go through the process of running the model
     """
-    cols = [v.get('odds_col')+'EV' for k,v in books.items()]
-    overs, idInfo = run_model(model_name,date)
-    odf = od.fetch_odds(model_name)
-    df = od.bet_table(overs, odf, od.market_vars.get(model_name).get('col_name'))
+    date = date or dt.datetime.today().strftime('%Y-%m-%d')
+    overs = pd.read_sql("SELECT * FROM predictions WHERE game_date = '{}' ".format(date),etl.conn)
+    odf = od.fetch_odds(MODEL_NAME)
+    df = od.bet_table(overs, odf, od.market_vars.get(MODEL_NAME).get('col_name'))
     etl.insert_data(df,'lines',sort=True)
     etl.insert_data(df,'predictions',sort=True)
-    return df
+    amts = [col for col in df.columns if re.search('Amount$', col) != None]
+    final = df[(df[amts]>value).any(axis=1)]
+    return final
 
 
 @st.cache_data(ttl=300)
