@@ -123,9 +123,7 @@ class odds():
             final['{}EV'.format(prefix)] = ['{:.2%}'.format(self.ev(p, odd)) for p, odd in
                                             zip(final.prob, final[odds_col].replace(0, 1))]
             final['{}Amount'.format(prefix)] = [round(x * self.budget * self.kellyVal, 2) for x in kelly]
-        amts = [col for col in final.columns if re.search('Amount$',col)!=None]
-        f = final[(final[amts]>self.unit/2).any(axis=1)]
-        return f
+        return final
 
     def twoWayOdds(self,df,numCol,book):
         '''

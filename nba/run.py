@@ -51,14 +51,19 @@ def run_model(model_name,date=None):
     preds = model.model.predict(sm.add_constant(td.filter(model.features), has_constant='add'))
     idInfo = model.data[model.data.game_date == date][['name','player_id','team','game_id']].copy()
     idInfo['name'] = data.standardize_names(idInfo['name'])
-
-    return od.oddsTable(preds, idInfo),idInfo
+    df = od.oddsTable(preds, idInfo)
+    etl.insert_data(df,'predictions',sort=True)
+    return df, idInfo
 
 #I dont know that this is needed because we are going to use run model and then I dont want all the pieces connected here
-def run_pipeline():
+def run_pipeline(model_name):
     data_pull()
-    overs, idInfo = run_model(args.model)
-    odf = od.fetch_odds(args.model)
+    result = subprocess.run(['pytest', 'tests/', '-v'], capture_output=True)
+    if result.returncode != 0:
+        logger.error('Tests failed — skipping predictions\n{}'.format(result.stdout.decode()))
+        return None
+    overs, idInfo = run_model(model_name)
+    odf = od.fetch_odds(model_name)
     final = od.bet_table(overs, odf)
     return final
 

@@ -721,27 +721,4 @@ class etl(base):
 			logger.warning("{}: tracking data unavailable - {}".format(date, e))
 		return final.filter(ord)
 
-	def write_predictions(self,final, conn):
-		today = dt.datetime.today().strftime('%Y-%m-%d')
-		final['date'] = today
-		final['bet_book'] = None
-		final['final_line'] = None
-		final['bet_amount'] = None
-		final['result'] = None
-		final.rename(columns={'threesMade': 'number', 'name': 'player_id'}, inplace=True)
-		final[['player_id', 'date', 'over_under', 'number', 'prob',
-			   'DraftKings', 'FanDuel', 'TheScore_Bet',
-			   'ev_draftkings', 'ev_fanduel', 'ev_espnbet',
-			   'bet_book', 'final_line', 'bet_amount', 'result']].to_sql('predictions', self.conn, if_exists='append',
-																		 index=False)
 
-	# def run_data_update(self,yst = ):
-	# 	gids = self.get_games(yst, yst)
-	# 	self.update_player_log([yst])
-	# 	time.sleep(np.random.randint(5,15))
-	# 	try:
-	# 		self.update_shots_allowed([yst])
-	# 	except:
-	# 		print('shots not updated yet')
-	# 	time.sleep(np.random.randint(5,15))
-	# 	self.update_teamLog(gids.GAME_ID.unique())

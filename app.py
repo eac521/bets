@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 USERS = ['EAC', 'larBear']
 BOOKS = ['FanDuel', 'DraftKings', 'ESPNBet']
-MODEL_NAME = ['threes']
+MODEL_NAME = 'threes'
 
 st.set_page_config(page_title='NBA Betting Dashboard', layout='wide')
 
@@ -68,7 +68,6 @@ def create_todays_bets(MODEL_NAME,date=None,value=0):
     odf = od.fetch_odds(MODEL_NAME)
     df = od.bet_table(overs, odf, od.market_vars.get(MODEL_NAME).get('col_name'))
     etl.insert_data(df,'lines',sort=True)
-    etl.insert_data(df,'predictions',sort=True)
     amts = [col for col in df.columns if re.search('Amount$', col) != None]
     final = df[(df[amts]>value).any(axis=1)]
     return final
