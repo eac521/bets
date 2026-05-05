@@ -682,7 +682,7 @@ class etl(base):
 		   'PASSES_RECEIVED', 'FT_AST', 'SECONDARY_AST', 'POTENTIAL_AST',
 		   'AST_PTS_CREATED', 'AST_ADJ']
 			mergeCols = ['PLAYER_ID','TEAM_ID']
-			l = [[]
+			l = []
 			for date in tqdm(game_dates):
 
 				season = self.derive_season(date)

@@ -110,17 +110,18 @@ class odds():
         odf.columns = [c[1] if c[1] != '' else c[0] for c in odf.columns]
         return odf
 
-    def bet_table(self, overs, odf, sportsbooks=None):
+    def bet_table(self, lines, odf, sportsbooks=None):
         bks = sportsbooks or ['draftkings', 'fanduel', 'espnbet']
+
         active = {k: v for k, v in books.items() if k in bks}
-        final = overs.merge(odf, how='left', on=['name', 'number', 'over_under'])
-        final['prob'] = np.where(final.value < 0, round(abs(final.value) / (abs(final.value) + 100), 4),
-                                 round(100 / (final.value + 100), 4))
+        final = lines.merge(odf, how='left', on=['name', 'number', 'over_under'])
+        final['prob'] = np.where(final.model_prob < 0, round(abs(final.model_prob) / (abs(final.model_prob) + 100), 4),
+                                 round(100 / (final.model_prob + 100), 4))
         for book, meta in active.items():
             odds_col = meta['odds_col']
             prefix = meta['col_prefix']
             kelly = [self.kellyCrit(p, odd, False) for p, odd in zip(final.prob, final[odds_col])]
-            final['{}EV'.format(prefix)] = ['{:.2%}'.format(self.ev(p, odd)) for p, odd in
+            final['{}EV'.format(prefix)] = [self.ev(p, odd) for p, odd in
                                             zip(final.prob, final[odds_col].replace(0, 1))]
             final['{}Amount'.format(prefix)] = [round(x * self.budget * self.kellyVal, 2) for x in kelly]
         return final
@@ -145,11 +146,11 @@ class odds():
         return grouped[['name',numCol,'fair_over_odds_{}'.format(book),'fair_under_odds_{}'.format(book),'{}Vig'.format(book)]]
 
     def build_odds_url(self, market, sportsbooks=None):
-        books = books if sportsbooks is None else sportsbooks
+        bks = list(books.keys()) if sportsbooks is None else sportsbooks
         return self.base_url.format(
             sport=self.market_vars[market]['sport'],
             markets=self.market_vars[market]['markets'],
-            books='%2c'.join(books)
+            books='%2c'.join(bks)
         )
 
     @staticmethod

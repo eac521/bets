@@ -266,11 +266,9 @@ class data(base):
 
     def refresh_materialized_tables(self):
         """Rebuild opp_data from source tables"""
-        print("Refreshing opp_data and pgames...")
-        self.cur.execute("DROP TABLE IF EXISTS opp_data")
-        self.derive_opp_data_table()
-        self.cur.execute("DROP TABLE IF EXISTS pgames")
-        self.derive_pgames_table()
+
+        print("Refreshing {}..".format(', '.join(derived_tables.keys())))
+        self.derive_tables()
 
     def refresh_views(self ,view_file):
         print("Refreshing views...")

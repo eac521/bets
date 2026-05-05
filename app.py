@@ -6,12 +6,15 @@ Run with: streamlit run app.py
 """
 import logging
 import sqlite3
-
+import re
+import datetime as dt
 import pandas as pd
 import streamlit as st
 
+
+
 from nba import NBAbase, NBAetl, NBAdata, NBAmodels
-from run import run_pipeline,data_pull,run_model
+from nba.run import run_pipeline,data_pull,run_model
 
 etl = NBAetl.etl()
 data = NBAdata.data()
@@ -28,20 +31,24 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ── Config ──
-
 USERS = ['EAC', 'larBear']
-BOOKS = ['FanDuel', 'DraftKings', 'ESPNBet']
+BOOKS = ['FanDuel', 'DraftKings', 'theScore_Bet']
 MODEL_NAME = 'threes'
+
 
 st.set_page_config(page_title='NBA Betting Dashboard', layout='wide')
 
 
 # ── Sidebar ──
+test_mode = st.sidebar.checkbox('Test Mode',value=True)
+test_date = None
+if test_mode:
+    test_date = st.sidebar.date_input('Test Date', value=dt.date(2026, 3, 23))
 st.sidebar.title('Settings')
 active_user = st.sidebar.selectbox('User', USERS)
 bankroll = st.sidebar.number_input(
     'Current Bankroll ($)',
-    min_value = 1000,
+    value = 1000.0,
     format='%.2f'
 )
 od.budget = bankroll
@@ -59,15 +66,24 @@ st.title('Bets to Place')
 
 
 @st.cache_data(ttl=300)
-def create_todays_bets(MODEL_NAME,date=None,value=0):
+def create_todays_bets(MODEL_NAME,date=None,value=0,test=False,bankroll=1000):
     """
     This will go through the process of running the model
     """
+    od.budget = bankroll
     date = date or dt.datetime.today().strftime('%Y-%m-%d')
-    overs = pd.read_sql("SELECT * FROM predictions WHERE game_date = '{}' ".format(date),etl.conn)
-    odf = od.fetch_odds(MODEL_NAME)
-    df = od.bet_table(overs, odf, od.market_vars.get(MODEL_NAME).get('col_name'))
-    etl.insert_data(df,'lines',sort=True)
+    preds = pd.read_sql('''SELECT name,team,over_under,number,model_line FROM predictions p
+    LEFT JOIN pgames on pgames.player_id = p.player_id and date = game_date WHERE date = '{}' '''.format(date),etl.conn)
+    if test:
+        odf = pd.read_sql('''SELECT name, over_under,number,FanDuel,DraftKings,theScore_Bet   
+        FROM lines l
+        LEFT JOIN players USING (player_id)
+        WHERE date = '{}' '''.format(date), etl.conn)
+    else:
+        odf = od.fetch_odds(MODEL_NAME)
+    df = od.bet_table(preds, odf)
+    if not test:
+        etl.insert_data(df, 'lines', sort=True)
     amts = [col for col in df.columns if re.search('Amount$', col) != None]
     final = df[(df[amts]>value).any(axis=1)]
     return final
@@ -88,9 +104,11 @@ def load_current_plays(user):
 
 
 
-
 # ── Display predictions and bet recording form ──
-plays = create_todays_bets(model_name)
+if test_mode:
+    plays = create_todays_bets(MODEL_NAME,date=str(test_date), test=True,bankroll=bankroll)
+else:
+    plays = create_todays_bets(MODEL_NAME,bankroll=bankroll)
 
 if plays.empty:
     st.info('No predictions available for today. Data may not have been refreshed yet.')
@@ -98,78 +116,65 @@ else:
     # Filter out bets already placed by this user
     open_bets = load_current_plays(active_user)
     if not open_bets.empty:
-        placed_keys = set(
-            zip(open_bets['player_id'], open_bets['over_under'])
-        )
+        placed_keys = set(zip(open_bets['player_id'], open_bets['over_under']))
         predictions = plays[
             ~plays.apply(
                 lambda row: (row['player_id'], row['over_under']) in placed_keys,
                 axis=1
             )
         ]
+    else:
+        predictions = plays
 
     if predictions.empty:
         st.success('All bets placed for today!')
     else:
-        st.dataframe(
-            predictions[['player_name', 'over_under', 'number', 'model_prob']],
+        # Display table — hide player_id, show what matters
+        display_cols =['name', 'over_under', 'number', 'prob'] + [b for b in BOOKS if b in predictions.columns]
+        # Add filter controls
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            ou_filter = st.selectbox('Over/Under', ['All', 'Over', 'Under'])
+        with col_f2:
+            team_filter = st.selectbox('Team', ['All'] + sorted(predictions['team'].unique().tolist()))
+        filtered = predictions.copy()
+        filtered['best_book'] = filtered[[b for b in BOOKS if b in predictions.columns]].idxmax(axis=1)
+        best_book_filter = st.selectbox('Best Book', ['All'] + BOOKS)
+        odds_range = st.slider('Odds Range', min_value=-1000, max_value=1000, value=(-200, 200), step=50)
+        if best_book_filter != 'All':
+            filtered = filtered[filtered['best_book'] == best_book_filter]
+        if ou_filter != 'All':
+            filtered = filtered[filtered['over_under'] == ou_filter]
+        if team_filter != 'All':
+            filtered = filtered[filtered['team'] == team_filter]
+
+        book_cols = [b for b in BOOKS if b in filtered.columns]
+        filtered = filtered[
+            filtered[book_cols].apply(
+                lambda row: row.between(odds_range[0], odds_range[1]).any(), axis=1
+            )
+        ]
+
+        # Add columns for bet recording
+
+        filtered.insert(0, 'bet', False)
+        filtered['book'] = 'None'
+        amt_cols = [col for col in filtered.columns if col.endswith('Amount')]
+        filtered['wager'] =  (filtered[amt_cols].max(axis=1) / 0.25).round() * 0.25
+
+        # Display with inline editing
+        ev_config = {col: st.column_config.NumberColumn(col, format='%.2f%%')
+                     for col in filtered.columns if col.endswith('EV')}
+        edited = st.data_editor(
+            filtered,
+            column_config={
+                'bet': st.column_config.CheckboxColumn('Bet?'),
+                'book': st.column_config.SelectboxColumn('Book', options=BOOKS),
+                'wager': st.column_config.NumberColumn('Wager ($)', min_value=0.0, step=.25, format='$%.2f'),
+                'player_id': None,  # hides the column
+                **ev_config,
+            },
             use_container_width=True,
             hide_index=True,
         )
 
-        st.subheader('Record Bets')
-        bets_to_confirm = []
-
-        for idx, row in plays.iterrows():
-            col1, col2, col3, col4 = st.columns([0.5, 2, 1.5, 1.5])
-            with col1:
-                selected = st.checkbox(
-                    'Select',
-                    key='chk_{}'.format(idx),
-                    label_visibility='collapsed',
-                )
-            with col2:
-                st.write('{} — {} {}'.format(
-                    row.get('player_name', row.get('player_id')),
-                    row['over_under'],
-                    row['number'],
-                ))
-            with col3:
-                book = st.selectbox(
-                    'Book',
-                    BOOKS,
-                    key='book_{}'.format(idx),
-                    label_visibility='collapsed',
-                )
-            with col4:
-                wager = st.number_input(
-                    'Wager ($)',
-                    min_value=0.0,
-                    step=5.0,
-                    key='wager_{}'.format(idx),
-                    label_visibility='collapsed',
-                )
-
-            if selected and wager > 0:
-                bets_to_confirm.append({
-                    'player_id': row['player_id'],
-                    'over_under': row['over_under'],
-                    'number': row['number'],
-                    'model_prob': row.get('model_prob'),
-                    'bet_book': book,
-                    'final_line': row.get('final_line', row['number']),
-                    'bet_amount': wager,
-                    'user': active_user,
-                })
-
-        if bets_to_confirm:
-            st.write('---')
-            st.write('{} bet(s) selected — ${:.2f} total'.format(
-                len(bets_to_confirm),
-                sum(b['bet_amount'] for b in bets_to_confirm),
-            ))
-            if st.button('Confirm Bets'):
-                etl.insert_data(pd.DataFrame(bets_to_confirm),'bets',sort=True)
-                st.success('Recorded {} bet(s)!'.format(len(bets_to_confirm)))
-                st.cache_data.clear()
-                st.rerun()

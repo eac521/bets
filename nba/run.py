@@ -3,12 +3,15 @@ logging.basicConfig(
     filename='nba_pipeline.log',
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-import datetime as dt
+
 import time
-import statsmodels.api as sm
+import subprocess
 import argparse
 import pandas as pd
+import datetime as dt
+import statsmodels.api as sm
 import numpy as np
+
 from nba import NBAbase, NBAetl, NBAdata, NBAmodels
 etl = NBAetl.etl()
 data = NBAdata.data()
@@ -52,7 +55,10 @@ def run_model(model_name,date=None):
     idInfo = model.data[model.data.game_date == date][['name','player_id','team','game_id']].copy()
     idInfo['name'] = data.standardize_names(idInfo['name'])
     df = od.oddsTable(preds, idInfo)
-    etl.insert_data(df,'predictions',sort=True)
+    df['date'] = date
+    df['market'] = model.name
+    etl.insert_data(df.rename(columns={"value":"model_lines"}),'predictions',sort=True)
+    df.drop(['date','market'],axis=1,inplace=True)
     return df, idInfo
 
 #I dont know that this is needed because we are going to use run model and then I dont want all the pieces connected here
@@ -62,13 +68,13 @@ def run_pipeline(model_name):
     if result.returncode != 0:
         logger.error('Tests failed — skipping predictions\n{}'.format(result.stdout.decode()))
         return None
-    overs, idInfo = run_model(model_name)
+    lines, idInfo = run_model(model_name)
     odf = od.fetch_odds(model_name)
-    final = od.bet_table(overs, odf)
+    final = od.bet_table(lines, odf)
     return final
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', required=True)
     args = parser.parse_args()
-    run_pipeline()
+    run_pipeline(args.model)
