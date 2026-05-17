@@ -8,6 +8,8 @@ from itertools import permutations
 import random
 from requests.exceptions import HTTPError
 import logging
+
+
 logger = logging.getLogger(__name__)
 from nba_api.stats.endpoints import (
 	BoxScoreAdvancedV3, PlayByPlayV3, BoxScoreSummaryV2,
@@ -55,40 +57,41 @@ class etl(base):
 						 'defensiveRating',
 						 'usagePercentage', 'pace', 'possessions', 'team_first', 'game_first', 'Starter']
 
-
 	def update_player_log(self, game_dates, seasons=None, insert=True, qtr=0):
-		'''Pull in prior days game log information for each player.  
-		Will pull in the log, first basket, rebounds and shooting stats for each player.
-		Inputs: list of game_dates, optionally can add the season to pull if many dates
-		Output: DataFrame with player logs, first buckets, rebounds, shooting locations and advanced stats, also will message plyrLogs updated.'''
-		#get the individual dataframes
+		'''Pull in prior days game log information for each player.
+        Will pull in the log, first basket, rebounds and shooting stats for each player.
+        Inputs: list of game_dates, optionally can add the season to pull if many dates
+        Output: DataFrame with player logs, first buckets, rebounds, shooting locations and advanced stats, also will message plyrLogs updated.'''
 		table = 'plyrLogs' if qtr == 0 else 'plyrQ{}Logs'.format(qtr)
 		strD = ','.join(["'{}'".format(d) for d in game_dates])
-		log = self.get_logs(game_dates,seasons) #has all 4
-		bskt = self.get_first_buckets(game_dates) #playerid,gameid
-		time.sleep(np.random.randint(1,15))
-		rbs = self.get_rebounds(game_dates) #all 4
-		adv = self.get_advanced_box(game_dates) # gameid,playerid
-		time.sleep(np.random.randint(1,15))
-		shts = self.get_player_shot_spots(game_dates) #has playerid,gamedate,teamid
-		#merge dataframes together
-		logrbs = log.merge(rbs,how='left',on=['PLAYER_ID','GAME_ID','TEAM_ID','GAME_DATE']).fillna(0)
-		logRbsSht = logrbs.merge(shts,how='left',on=['TEAM_ID','PLAYER_ID','GAME_DATE'])
-		advBskt = adv.merge(bskt,how='left',on = ['PLAYER_ID','GAME_ID'])
-		#final dataframe
-		final = logRbsSht.merge(advBskt,how='left',on=['PLAYER_ID','GAME_ID'])
-		final.columns = ['player_id','team_id','game_id','game_date','min','ftm','fta','reb','ast','tov','stl','blk','blka','pf',
-			'pfd','pts','plus_minus','dd2','td3','oreb','oreb_contest','oreb_chances','oreb_chance_defer','avg_oreb_dist','dreb',
-			'dreb_contest','dreb_chances','dreb_chance_defer','avg_dreb_dist','ra_fgm','ra_fga', 'paint_fgm', 'paint_fga','mid_fgm',
-			'mid_fga', 'lc_fgm','lc_fga', 'rc_fgm','rc_fga','abv_fgm', 'abv_fga', 'offensiveRating','defensiveRating',
-			'usagePercentage', 'pace', 'possessions','Starter','team_first', 'game_first']
-		final = final.filter(pd.read_sql('select * from plyrLogs limit 1',self.conn).columns.values)
-		if (pd.read_sql("select count(*) as ct  from {} where game_date in ({})".format(table,strD),self.conn).sum()>0).all():
-			self.conn.execute("DELETE FROM {} where game_date in ({})".format(table,strD))
+		log = self.get_logs(game_dates, seasons)
+		time.sleep(np.random.randint(1, 15))
+		bskt = self.get_first_buckets(game_dates)
+		time.sleep(np.random.randint(1, 15))
+		rbs = self.get_rebounds(game_dates)
+		time.sleep(np.random.randint(1, 15))
+		adv = self.get_advanced_box(game_dates)
+		time.sleep(np.random.randint(1, 15))
+		shts = self.get_player_shot_spots(game_dates)
+		logrbs = log.merge(rbs, how='left', on=['PLAYER_ID', 'GAME_ID', 'TEAM_ID', 'GAME_DATE']).fillna(0)
+		logRbsSht = logrbs.merge(shts, how='left', on=['TEAM_ID', 'PLAYER_ID', 'GAME_DATE'])
+		advBskt = adv.merge(bskt, how='left', on=['PLAYER_ID', 'GAME_ID'])
+		final = logRbsSht.merge(advBskt, how='left', on=['PLAYER_ID', 'GAME_ID'])
+		final.columns = ['player_id', 'team_id', 'game_id', 'game_date', 'min', 'ftm', 'fta', 'reb', 'ast', 'tov',
+						 'stl', 'blk', 'blka', 'pf',
+						 'pfd', 'pts', 'plus_minus', 'dd2', 'td3', 'oreb', 'oreb_contest', 'oreb_chances',
+						 'oreb_chance_defer', 'avg_oreb_dist', 'dreb',
+						 'dreb_contest', 'dreb_chances', 'dreb_chance_defer', 'avg_dreb_dist', 'ra_fgm', 'ra_fga',
+						 'paint_fgm', 'paint_fga', 'mid_fgm',
+						 'mid_fga', 'lc_fgm', 'lc_fga', 'rc_fgm', 'rc_fga', 'abv_fgm', 'abv_fga', 'offensiveRating',
+						 'defensiveRating',
+						 'usagePercentage', 'pace', 'possessions', 'Starter', 'team_first', 'game_first']
+		final = final.filter(pd.read_sql('select * from plyrLogs limit 1', self.conn).columns.values)
+		if (pd.read_sql("select count(*) as ct from {} where game_date in ({})".format(table, strD),
+						self.conn).sum() > 0).all():
+			self.conn.execute("DELETE FROM {} where game_date in ({})".format(table, strD))
 			self.conn.commit()
-		self.insert_data(final,table)
-		if np.random.randint(0,100) % 7==0:
-			time.sleep(np.random.randint(30,120))
+		self.insert_data(final, table)
 		#return final
 		
 	def update_teamLog(self,game_ids):

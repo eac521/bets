@@ -133,18 +133,28 @@ else:
         display_cols =['name', 'over_under', 'number', 'prob'] + [b for b in BOOKS if b in predictions.columns]
         # Add filter controls
         col_f1, col_f2 = st.columns(2)
+        games = pd.read_sql("""
+            SELECT GROUP_CONCAT(teamAbrv) as teams,
+                   MAX(CASE WHEN t.home = 0 THEN tms.teamAbrv END) || ' @ ' ||
+                   MAX(CASE WHEN t.home = 1 THEN tms.teamAbrv END) AS game_label
+            FROM teamLog t
+            LEFT JOIN teams tms USING (team_id)
+            WHERE t.game_date = {}
+            GROUP BY t.game_id
+        """.format("'"+str(test_date)+"'" if test_date is not None else "DATE ('now')"), etl.conn)
+
         with col_f1:
-            ou_filter = st.selectbox('Over/Under', ['All', 'Over', 'Under'])
+            game_filter = st.selectbox('Game', ['All'] + games.game_label.tolist())
+        filtered = predictions.copy()
+        if game_filter != 'All':
+            filtered = filtered[filtered['team'].isin(game_filter.split(' @ '))]
         with col_f2:
             team_filter = st.selectbox('Team', ['All'] + sorted(predictions['team'].unique().tolist()))
-        filtered = predictions.copy()
         filtered['best_book'] = filtered[[b for b in BOOKS if b in predictions.columns]].idxmax(axis=1)
         best_book_filter = st.selectbox('Best Book', ['All'] + BOOKS)
         odds_range = st.slider('Odds Range', min_value=-1000, max_value=1000, value=(-200, 200), step=50)
         if best_book_filter != 'All':
             filtered = filtered[filtered['best_book'] == best_book_filter]
-        if ou_filter != 'All':
-            filtered = filtered[filtered['over_under'] == ou_filter]
         if team_filter != 'All':
             filtered = filtered[filtered['team'] == team_filter]
 
@@ -174,7 +184,7 @@ else:
                 'player_id': None,  # hides the column
                 **ev_config,
             },
-            use_container_width=True,
+            width = 'content',
             hide_index=True,
         )
 

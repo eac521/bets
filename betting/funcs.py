@@ -1,12 +1,13 @@
 import json
 import requests
+import re
+import os
 import pandas as pd
 import numpy as np
-import os
 import datetime as dt
-import re
 from itertools import combinations
 from betting.constants import books
+from collections import Counter, defaultdict
 '''
 Creating general betting functions that will be shared between NFL and NBA
 '''
@@ -115,8 +116,8 @@ class odds():
 
         active = {k: v for k, v in books.items() if k in bks}
         final = lines.merge(odf, how='left', on=['name', 'number', 'over_under'])
-        final['prob'] = np.where(final.model_prob < 0, round(abs(final.model_prob) / (abs(final.model_prob) + 100), 4),
-                                 round(100 / (final.model_prob + 100), 4))
+        final['prob'] = np.where(final.model_line < 0, round(abs(final.model_line) / (abs(final.model_line) + 100), 4),
+                                 round(100 / (final.model_line + 100), 4))
         for book, meta in active.items():
             odds_col = meta['odds_col']
             prefix = meta['col_prefix']
@@ -165,7 +166,6 @@ class odds():
                 return 9900
             else:
                 return int(100 / x - 100)
-
         else:
             if x >= .99:
                 return -9900
@@ -221,3 +221,17 @@ class odds():
             over = self.convertOddsToPercent(over)
             under = self.convertOddsToPercent(under)
         return over/(over+under) if side == "over" else under/(under+over)
+    @staticmethod
+    def game_leaders(df):
+        results = []
+        df = df.reset_index(drop=True)
+        for iter in range(sims):
+            vals = [x for x in df.columns if type(x)==int]
+            threes = np.array([np.random.choice(vals, p=df[vals].loc[i].values)
+                               for i in range(len(df))])
+            max_val = max(threes)
+            winner_idx = threes.argmax()
+            results.append((df.loc[winner_idx]['name'], max_val))
+
+        winner_counts = Counter([r[0] for r in results])
+        return winner_counts,results

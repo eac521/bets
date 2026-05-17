@@ -37,9 +37,9 @@ class base():
         if isinstance(date,str):
             d = pd.to_datetime(date)
         if d.month <=9:
-            return '{:%Y}-{:%y}'.format(pd.to_datetime(d)-  pd.to_timedelta(365.25,'days'),pd.to_datetime(d))
+            return '{:%Y}-{:%y}'.format(pd.to_datetime(d)-  pd.to_timedelta(365,'days'),pd.to_datetime(d))
         else:
-            return '{:%Y}-{:%y}'.format(pd.to_datetime(d),pd.to_datetime(d) + pd.to_timedelta(365.25,'days'))
+            return '{:%Y}-{:%y}'.format(pd.to_datetime(d),pd.to_datetime(d) + pd.to_timedelta(365,'days'))
     
     def insert_data(self,data,table,sort=False,verbose=True):
         '''Simply writes the data insto the table, needs to be in the correct order

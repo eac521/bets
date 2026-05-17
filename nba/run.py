@@ -57,6 +57,7 @@ def run_model(model_name,date=None):
     df = od.oddsTable(preds, idInfo)
     df['date'] = date
     df['market'] = model.name
+    df.rename(columns={'value':'model_line'}, inplace=True)
     etl.insert_data(df.rename(columns={"value":"model_lines"}),'predictions',sort=True)
     df.drop(['date','market'],axis=1,inplace=True)
     return df, idInfo

@@ -7,7 +7,7 @@ from .constants import NAME_MAP, derived_tables
 from .NBAbase import base
 import logging
 logger = logging.getLogger(__name__)
-
+logging.basicConfig(level=logging.INFO)
 '''
 This class is focused on what is already load via the nba api and stored in our database.
 Focus of this class is related to data for modeling. 

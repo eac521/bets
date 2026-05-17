@@ -1,3 +1,7 @@
+
+import os
+
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 NAME_MAP = {
     'Herb Jones': 'Herbert Jones',
     'Alex Sarr': 'Alexandre Sarr',
@@ -9,11 +13,11 @@ NAME_MAP = {
 }
 derived_tables = {
     'opp_data': {
-        'file': 'nba/data/sql/opp_data.sql',
+        'file': os.path.join(_BASE_DIR, 'data', 'sql', 'derive_opp_table.sql'),
         'indexes': [('idx_opp_data', 'game_id, opp_id')]
     },
     'pgames': {
-        'file': 'nba/data/sql/derivPgamesTable.sql',
+        'file': os.path.join(_BASE_DIR, 'data', 'sql', 'derivePgamesTable.sql'),
         'indexes': [
             ('idx_pgames_player_season_date', 'player_id, season, game_date'),
             ('idx_pgames_player_date', 'player_id, game_date')
