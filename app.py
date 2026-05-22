@@ -64,6 +64,15 @@ if st.sidebar.button('Refresh Data (Override)'):
 # ── Dashboard ──
 st.title('Bets to Place')
 
+def get_preds(MODEL_NAME,date,pivot=False):
+   df =  pd.read_sql('''SELECT name,team,over_under,number,model_prob FROM predictions p
+        LEFT JOIN pgames on pgames.player_id = p.player_id and date = game_date WHERE date = '{}' 
+        AND market = '{}' '''.format(date, MODEL_NAME), etl.conn)
+   if pivot:
+       wide = df.pivot(columns='over_under', index=['name','team','number', values='model_prob')
+       return
+   else:
+       return df
 
 @st.cache_data(ttl=300)
 def create_todays_bets(MODEL_NAME,date=None,value=0,test=False,bankroll=1000):
@@ -72,8 +81,7 @@ def create_todays_bets(MODEL_NAME,date=None,value=0,test=False,bankroll=1000):
     """
     od.budget = bankroll
     date = date or dt.datetime.today().strftime('%Y-%m-%d')
-    preds = pd.read_sql('''SELECT name,team,over_under,number,model_line FROM predictions p
-    LEFT JOIN pgames on pgames.player_id = p.player_id and date = game_date WHERE date = '{}' '''.format(date),etl.conn)
+    preds = get_preds(MODEL_NAME,date)
     if test:
         odf = pd.read_sql('''SELECT name, over_under,number,FanDuel,DraftKings,theScore_Bet   
         FROM lines l
@@ -187,4 +195,31 @@ else:
             width = 'content',
             hide_index=True,
         )
+if st.button('Save Bets'):
+    selected = edited[edited['bet'] == True]
+    if selected.empty:
+        st.warning('No bets selected.')
+    elif (selected['book'] == 'None').any():
+        st.error('Select a book for all checked bets.')
+    else:
+        bet_date = str(test_date) if test_mode else dt.datetime.today().strftime('%Y-%m-%d')
+        save_df = pd.DataFrame({
+            'player_id': selected['player_id'].values,
+            'date': bet_date,
+            'market': MODEL_NAME,
+            'over_under': selected['over_under'].values,
+            'number': selected['number'].values,
+            'bet_book': selected['book'].values,
+            'final_line': selected.apply(lambda r: r[r['book']], axis=1).values,
+            'bet_amount': selected['wager'].values,
+            'user': active_user,
+        })
+        etl.insert_data(save_df, 'bets')
+        load_current_plays.clear()
+        create_todays_bets.clear()
+        st.rerun()
+st.divider()
+st.header('Special Markets')
+tab_h2h, tab_gl = st.tabs(['H2H', 'Game Leader'])
+
 

@@ -6,6 +6,8 @@ import pandas as pd
 import numpy as np
 import datetime as dt
 from itertools import combinations
+
+
 from betting.constants import books
 from collections import Counter, defaultdict
 '''
@@ -79,8 +81,8 @@ class odds():
         return final
 
     def oddsTable(self,preds,idInfo):
-        finalo = self.accumulateOdds(preds,preds.columns[::-1])
-        finalu = self.accumulateOdds(preds,preds.columns)
+        finalo = self.accumulateOdds(preds,preds.columns[::-1],convert=False)
+        finalu = self.accumulateOdds(preds,preds.columns,convert=False)
         finalu['over_under'] = 'Under'
         finalo['over_under'] = 'Over'
         overs = idInfo.join(finalo).melt(id_vars = ['name','team','player_id','over_under'],value_vars = preds.columns, var_name = 'number')
@@ -116,14 +118,13 @@ class odds():
 
         active = {k: v for k, v in books.items() if k in bks}
         final = lines.merge(odf, how='left', on=['name', 'number', 'over_under'])
-        final['prob'] = np.where(final.model_line < 0, round(abs(final.model_line) / (abs(final.model_line) + 100), 4),
-                                 round(100 / (final.model_line + 100), 4))
+        final['model_line'] = [self.convertPercentToOdds(x) for x in final.model_prob]
         for book, meta in active.items():
             odds_col = meta['odds_col']
             prefix = meta['col_prefix']
-            kelly = [self.kellyCrit(p, odd, False) for p, odd in zip(final.prob, final[odds_col])]
+            kelly = [self.kellyCrit(p, odd, False) for p, odd in zip(final.model_prob, final[odds_col])]
             final['{}EV'.format(prefix)] = [self.ev(p, odd) for p, odd in
-                                            zip(final.prob, final[odds_col].replace(0, 1))]
+                                            zip(final.model_prob, final[odds_col].replace(0, 1))]
             final['{}Amount'.format(prefix)] = [round(x * self.budget * self.kellyVal, 2) for x in kelly]
         return final
 
@@ -221,17 +222,71 @@ class odds():
             over = self.convertOddsToPercent(over)
             under = self.convertOddsToPercent(under)
         return over/(over+under) if side == "over" else under/(under+over)
+
     @staticmethod
     def game_leaders(df):
         results = []
         df = df.reset_index(drop=True)
         for iter in range(sims):
             vals = [x for x in df.columns if type(x)==int]
-            threes = np.array([np.random.choice(vals, p=df[vals].loc[i].values)
+            vals = np.array([np.random.choice(vals, p=df[vals].loc[i].values)
                                for i in range(len(df))])
-            max_val = max(threes)
-            winner_idx = threes.argmax()
+            max_val = max(vals)
+            winner_idx = vals.argmax()
             results.append((df.loc[winner_idx]['name'], max_val))
 
         winner_counts = Counter([r[0] for r in results])
         return winner_counts,results
+
+    def h2h(self,preds, fav, udog, spread, ovrLines):
+        ovr = {}
+        df = preds[preds.name.isin([fav, udog])].set_index('name')
+
+        # Spread calculations (correct as-is)
+        fsp = sum([df.loc[udog][i] * df.loc[fav][int(np.ceil(i + spread)):].sum()
+                   for i in range(0, 10)])
+        usp = sum([df.loc[fav][i] * df.loc[udog][int(np.ceil(i - spread)) if i - spread > 0 else 0:].sum()
+                   for i in range(0, 10)])
+
+        # Moneyline - strict wins only
+        fml_wins = sum([df.loc[fav][i] * df.loc[udog][:i].sum() for i in range(1, 10)])
+        uml_wins = sum([df.loc[udog][i] * df.loc[fav][:i].sum() for i in range(1, 10)])
+
+        # Push probability
+        push = sum([df.loc[fav][i] * df.loc[udog][i] for i in range(10)])
+
+        # Conditional probabilities (for comparing to book odds)
+        fml_cond = fml_wins / (fml_wins + uml_wins) if (fml_wins + uml_wins) > 0 else 0
+        uml_cond = uml_wins / (fml_wins + uml_wins) if (fml_wins + uml_wins) > 0 else 0
+
+        # Over/Under - correct calculation
+        undr = sum([df.loc[fav][i] * df.loc[udog][j]
+                    for i in range(10)
+                    for j in range(10)
+                    if i + j < ovrLine])
+
+        ovr[fav] = {
+            'spreadLine': self.convertPercentToOdds(fsp),
+            'spreadProb': round(fsp, 3),
+            'ml': self.convertPercentToOdds(fml_cond),  # Use conditional
+            'mlWinProb': round(fml_wins, 3),  # Unconditional for Kelly
+            'mlCondProb': round(fml_cond, 3)  # For comparing to book
+        }
+
+        ovr[udog] = {
+            'spreadLine': self.convertPercentToOdds(usp),
+            'spreadProb': round(usp, 3),
+            'ml': self.convertPercentToOdds(uml_cond),  # Use conditional
+            'mlWinProb': round(uml_wins, 3),  # Unconditional for Kelly
+            'mlCondProb': round(uml_cond, 3)  # For comparing to book
+        }
+
+        ovr['combined'] = {
+            'pushProb': round(push, 3),
+            'underProb': round(undr, 3),
+            'underMl': self.convertPercentToOdds(undr),
+            'overProb': round(1 - undr, 3),
+            'overMl': self.convertPercentToOdds(1 - undr)
+        }
+
+        return pd.DataFrame(ovr).T
