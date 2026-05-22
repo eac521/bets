@@ -65,12 +65,12 @@ if st.sidebar.button('Refresh Data (Override)'):
 st.title('Bets to Place')
 
 def get_preds(MODEL_NAME,date,pivot=False):
-   df =  pd.read_sql('''SELECT name,team,over_under,number,model_prob FROM predictions p
+   df =  pd.read_sql('''SELECT name,team,p.player_id,number,model_prob FROM predictions p
         LEFT JOIN pgames on pgames.player_id = p.player_id and date = game_date WHERE date = '{}' 
         AND market = '{}' '''.format(date, MODEL_NAME), etl.conn)
    if pivot:
-       wide = df.pivot(columns='over_under', index=['name','team','number', values='model_prob')
-       return
+       wide = df.pivot_table(index=['name','team','player_id'],columns = 'number',values='model_prob').reset_index()
+       return wide
    else:
        return df
 
@@ -81,7 +81,8 @@ def create_todays_bets(MODEL_NAME,date=None,value=0,test=False,bankroll=1000):
     """
     od.budget = bankroll
     date = date or dt.datetime.today().strftime('%Y-%m-%d')
-    preds = get_preds(MODEL_NAME,date)
+    wide = get_preds(MODEL_NAME,date,pivot=True)
+    preds = od.oddsTable(wide)
     if test:
         odf = pd.read_sql('''SELECT name, over_under,number,FanDuel,DraftKings,theScore_Bet   
         FROM lines l
@@ -218,8 +219,48 @@ if st.button('Save Bets'):
         load_current_plays.clear()
         create_todays_bets.clear()
         st.rerun()
+## special markets
 st.divider()
 st.header('Special Markets')
-tab_h2h, tab_gl = st.tabs(['H2H', 'Game Leader'])
+game_filter = st.selectbox('Select Game', ['All'] + games.game_label.tolist())
+special_market = get_preds(MODEL_NAME,test_date, pivot = True)
+special_market = special_market[special_market['team'].isin(game_filter.split(' @ '))]
+
+@st.cache_data
+def run_game_leaders(game_filter, special_market):
+    df = special_market[special_market['team'].isin(game_filter.split(' @ '))]
+    return od.game_leaders(df)
+
+col1, col2, col3, col4 = st.columns(4)
+pred_val = col1.number_input('Predicted Odds', value=100)
+market_val = col2.number_input('Market Odds', value=100,)
+
+if pred_val and market_val:
+    ev = od.ev(pred_val, market_val)
+    bet = od.kellyCrit(pred_val, market_val)
+    col3.metric('EV', '{:.1%}'.format(ev))
+    col4.metric('Bet Amount', '${:.2f}'.format(bet))
+
+
+if game_filter != 'All':
+    gl, makeX = run_game_leaders(game_filter, special_market)
+    col1, col2 = st.columns(2)
+    col1.subheader('Game Leader')
+    col1.dataframe(gl.style.format({'Win Rate': '{:.1%}'}))
+
+    col2.subheader('Make X Threes')
+    col2.dataframe(makeX.style.format({'Prob': '{:.1%}'}))
+
+st.subheader('H2H')
+
+col1, col2 = st.columns(2)
+fav = col1.selectbox('Favorite', special_market['name'].unique())
+udog = col2.selectbox('Underdog', special_market['name'].unique())
+spread = st.number_input('Spread', value=0.5,step=1.0)
+ovrLine = st.number_input('Over/Under Line', value=5.5,step=1.0)
+
+if st.button('Calculate H2H'):
+    result = od.h2h(special_market, fav, udog, spread, ovrLine)
+    st.dataframe(result)
 
 

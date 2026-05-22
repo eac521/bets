@@ -57,9 +57,12 @@ def run_model(model_name,date=None):
     df = od.oddsTable(preds, idInfo)
     preds['date'] = date
     preds['market'] = model.name
+    final = idInfo.join(preds).melt(id_vars=['market', 'player_id', 'date'],
+         value_vars=[col for col in preds if isinstance(col, int)],
+         value_name='model_prob',
+         var_name='number').round(6)
     df.rename(columns={'value':'model_prob'}, inplace=True)
-    etl.insert_data(preds.join(idInfo),'predictions',sort=True)
-    df.drop(['date','market'],axis=1,inplace=True)
+    etl.insert_data(final,'predictions',sort=True)
     return df
 
 #I dont know that this is needed because we are going to use run model and then I dont want all the pieces connected here

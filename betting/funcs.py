@@ -72,7 +72,7 @@ class odds():
         if show:
             print('EV: {:.2%}\nStraight Wager {:.2f}\nParlay {:.2f}\nPayout: ${:.2f}'.format(
                 self.ev(prob,odds),wager,wager * pbudg,wager * b))
-        return kv
+        return wager
 
     def accumulateOdds(self,df,order,convert=True):
         final = pd.DataFrame(np.array(
@@ -80,13 +80,15 @@ class odds():
             .reshape(df[order].shape),columns=order, index=df.index)
         return final
 
-    def oddsTable(self,preds,idInfo):
-        finalo = self.accumulateOdds(preds,preds.columns[::-1],convert=False)
-        finalu = self.accumulateOdds(preds,preds.columns,convert=False)
+    def oddsTable(self,preds):
+        outcomes = [c for c in preds.columns if isinstance(c, (int, float))]
+        ids = [c for c in preds.columns if c not in outcomes]
+        finalo = self.accumulateOdds(preds,sorted(outcomes,reverse=True),convert=False)
+        finalu = self.accumulateOdds(preds,outcomes,convert=False)
         finalu['over_under'] = 'Under'
         finalo['over_under'] = 'Over'
-        overs = idInfo.join(finalo).melt(id_vars = ['name','team','player_id','over_under'],value_vars = preds.columns, var_name = 'number')
-        unders = idInfo.join(finalu).melt(id_vars = ['name','team','player_id','over_under'],value_vars = preds.columns, var_name = 'number')
+        overs = finalo.join(preds[ids]).melt(id_vars = ['name','team','player_id','over_under'],value_vars = preds.columns, var_name = 'number',value_name = 'model_prob')
+        unders = finalu.join(preds[ids]).melt(id_vars = ['name','team','player_id','over_under'],value_vars = preds.columns, var_name = 'number',value_name = 'model_prob')
         final = pd.concat([overs, unders])
         final['number'] = np.where(final.over_under=='Over',final['number']-.5, final['number'] +.5)
         final = final[final['number']>0]
@@ -174,15 +176,16 @@ class odds():
                 return int(1 - (100 / (1 - x) - 100))
 
 
-    @staticmethod
-    def ev(winProb, odds):
+    def ev(self,winProb, odds):
         '''
         Need the probability your bet wins and given odds.  Will caluclate the effective value by this formula
         winProb * odds/100 - (1-winProb)
         '''
         mult = odds / 100 if odds > 0 else 100/abs(odds)
-        l = 1 - winProb
-        return winProb * mult - l
+        wp = self.convertOddsToPercent(winProb) if abs(winProb) > 0 else winProb
+        l = 1 - wp
+        print(mult,wp)
+        return wp * mult - l
 
 
 
@@ -224,23 +227,31 @@ class odds():
         return over/(over+under) if side == "over" else under/(under+over)
 
     @staticmethod
-    def game_leaders(df):
+    def game_leaders(df, sims=10000):
         results = []
         df = df.reset_index(drop=True)
-        for iter in range(sims):
-            vals = [x for x in df.columns if type(x)==int]
-            vals = np.array([np.random.choice(vals, p=df[vals].loc[i].values)
-                               for i in range(len(df))])
-            max_val = max(vals)
+        cols = [x for x in df.columns if str(x).replace('.0', '').isdigit()]
+        int_cols = [int(c) for c in cols]
+        prob_matrix = (df[cols].values / df[cols].values.sum(axis=1, keepdims=True))
+
+        for _ in range(sims):
+            vals = np.array([np.random.choice(int_cols, p=prob_matrix[i]) for i in range(len(df))])
             winner_idx = vals.argmax()
-            results.append((df.loc[winner_idx]['name'], max_val))
+            results.append((df.loc[winner_idx]['name'], vals[winner_idx]))
 
         winner_counts = Counter([r[0] for r in results])
-        return winner_counts,results
+        final = pd.DataFrame().from_dict(winner_counts, orient='index', columns=['Wins'])
+        final['Win Rate'] = final.Wins / sims
+        final['Line'] = [odds.convertPercentToOdds(x) for x in final['Win Rate']]
+        gl =final.sort_values(by='Win Rate', ascending=False)[['Line', 'Win Rate']]
+        makeX = (1 - (1 - (df.iloc[:, 4:].T.sort_index(ascending=False).cumsum())).product(axis=1)).round(5)
+        makeX = makeX.to_frame(name='Prob')
+        makeX['line'] = makeX['Prob'].apply(lambda x: odds.convertPercentToOdds(x))
+        return gl,makeX
 
-    def h2h(self,preds, fav, udog, spread, ovrLines):
+    def h2h(self,preds, fav, udog, spread, ovrLine):
         ovr = {}
-        df = preds[preds.name.isin([fav, udog])].set_index('name')
+        df = preds[preds.name.isin([fav, udog])].drop(['team','player_id'],axis=1).set_index('name')
 
         # Spread calculations (correct as-is)
         fsp = sum([df.loc[udog][i] * df.loc[fav][int(np.ceil(i + spread)):].sum()
