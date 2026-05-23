@@ -1,0 +1,13 @@
+pandas
+numpy
+scipy
+statsmodels
+scikit-learn
+streamlit
+requests
+tqdm
+matplotlib
+nba_api
+python-dotenv
+pytest
+ruff
