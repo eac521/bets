@@ -1,5 +1,5 @@
 
-CREATE VIEW team_def AS
+CREATE TABLE IF NOT EXISTS  team_def AS
     WITH grpdShots AS (
     SELECT team_id, game_id,
     CAST(lc_fga + rc_fga + abv_fga AS FLOAT) AS threes_fga,
@@ -30,7 +30,7 @@ CREATE VIEW team_def AS
 select 
 season, substr(sht.game_date,6,2) as month, teamAbrv as team, rank() OVER(PARTITION BY team_id,season ORDER BY sht.game_date) game_number,
 --last games played
-julianday(sht.game_date) - game1_date - 1 daysBetweenGames,
+julianday(log.game_date) - game1_date - 1 daysBetweenGames,
 (
 case when julianday(log.game_date) - game5_date < 5 then 1 else 0 end +
 case when julianday(log.game_date) - game4_date < 5 then 1 else 0 end + 
