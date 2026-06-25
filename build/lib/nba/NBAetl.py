@@ -72,7 +72,7 @@ class etl(base):
 		time.sleep(np.random.randint(1, 15))
 		adv = self.get_advanced_box(game_dates)
 		time.sleep(np.random.randint(1, 15))
-		shts = self.tracking_shot_spots(game_dates)
+		shts = self.get_player_shot_spots(game_dates)
 		logrbs = log.merge(rbs, how='left', on=['PLAYER_ID', 'GAME_ID', 'TEAM_ID', 'GAME_DATE']).fillna(0)
 		logRbsSht = logrbs.merge(shts, how='left', on=['TEAM_ID', 'PLAYER_ID', 'GAME_DATE'])
 		advBskt = adv.merge(bskt, how='left', on=['PLAYER_ID', 'GAME_ID'])
@@ -118,6 +118,13 @@ class etl(base):
 			'Right_Corner_3_OPP_FGA', 'Above_the_Break_3_OPP_FGM',
 			'Above_the_Break_3_OPP_FGA', 'Corner_3_OPP_FGM', 'Corner_3_OPP_FGA', 'WIDEOPEN_FG2M', 'WIDEOPEN_FG2A',
 			'WIDEOPEN_FG3M', 'WIDEOPEN_FG3A', 'OPEN_FG2M', 'OPEN_FG2A', 'OPEN_FG3M', 'OPEN_FG3A',
+			'0_Dribbles_FG2M', '0_Dribbles_FG2A', '0_Dribbles_FG3M',
+			'0_Dribbles_FG3A', '1_Dribble_FG2M', '1_Dribble_FG2A', '1_Dribble_FG3M',
+			'1_Dribble_FG3A', '2_Dribbles_FG2M', '2_Dribbles_FG2A',
+			'2_Dribbles_FG3M', '2_Dribbles_FG3A', '3-6_Dribbles_FG2M',
+			'3-6_Dribbles_FG2A', '3-6_Dribbles_FG3M', '3-6_Dribbles_FG3A',
+			'7+_Dribbles_FG2M', '7+_Dribbles_FG2A', '7+_Dribbles_FG3M',
+			'7+_Dribbles_FG3A'
 		]
 		games = self.get_games(min(game_dates),max(game_dates))
 		#drb = self.get_opp_dribble_shot(game_dates)
@@ -278,7 +285,7 @@ class etl(base):
 		final = pd.DataFrame()
 		for ct,date in enumerate(tqdm(game_dates)):
 			d = pd.to_datetime(date)
-			season = self.derive_season(date)
+			season = '{}-{}'.format(d.year,str(d.year+1)[-2:]) if d.month>=10 else '{}-{}'.format(d.year-1,str(d.year)[-2:])
 			drb = pd.DataFrame()
 			for dribbleCount in drib:
 				drbShots = LeagueDashPlayerPtShot(date_from_nullable = date,
@@ -300,7 +307,7 @@ class etl(base):
 
 
 
-	def tracking_shot_spots(self,game_dates,qtr=0):
+	def get_player_shot_spots(self,game_dates,qtr=0):
 		'''Expected Input: list of Dates of the game being played
 		Returns: a dataframe containing the player id, game date and their shot attempts and makes from each designated area
 		'''
@@ -312,6 +319,7 @@ class etl(base):
 			sht = LeagueDashPlayerShotLocations(date_from_nullable = date,
 				date_to_nullable = date,
 				season=season,period = qtr,timeout=60).get_data_frames()[0]
+			#op =
 			df = self.clean_shotcolumns(sht)
 			df['GAME_DATE'] = date
 			final = pd.concat([final,df])
@@ -363,7 +371,7 @@ class etl(base):
 		if add_season == False:
 			return games
 		else:
-			games['season'] =   [self.derive_season(x) for x in games.GAME_DATE]
+			games['season'] =   ['{}-{}'.format(x[:4],int(x[2:4])+1) if int(x[5:7]) > 9 else '{}-{}'.format(int(x[:4])-1,x[2:4]) for x in games.GAME_DATE]
 			return games
 
 
@@ -378,27 +386,30 @@ class etl(base):
 
 	def get_open_player_shots(self,game_dates):
 		openness = ['6+ Feet - Wide Open','4-6 Feet - Open','2-4 Feet - Tight','0-2 Feet - Very Tight']
-		l = []
-		d = pd.to_datetime(date)
-		season = self.derive_season(date)
-		for op in openness:
-			temp = LeagueDashPlayerPtShot(date_from_nullable=date,
-											date_to_nullable=date,
-											season=season,
-											close_def_dist_range_nullable=op
-											, timeout=60).get_data_frames()[0]
-			time.sleep(np.random.randint(2, 8))
-			df = temp.filter([col for col in temp.columns if re.search('[2-3][A|M]$|ID$', col) != None])
-			df.columns = [
-				'{}_{}'.format(op.replace(' ', '_'), col) if re.search('ID$', col) == None else col for
-				col in df.columns]
-			df['GAME_DATE'] = date
-			time.sleep(.8)
-			l.append(df)
-		final = pd.concat(l)
-		final = final.groupby(['PLAYER_ID', 'GAME_DATE']).sum().reset_index().drop(['PLAYER_LAST_TEAM_ID'], axis=1)
+		final = pd.DataFrame()
+		for ct, date in enumerate(tqdm(game_dates)):
+			d = pd.to_datetime(date)
+			season = '{}-{}'.format(d.year, str(d.year + 1)[-2:]) if d.month >= 10 else '{}-{}'.format(d.year - 1,
+																		   str(d.year)[-2:])
+			shots = pd.DataFrame()
+			for op in openness:
+				temp = LeagueDashPlayerPtShot(date_from_nullable=date,
+												  date_to_nullable=date,
+												  season=season,
+												  dribble_range_nullable=op
+												  , timeout=60).get_data_frames()[0]
+				time.sleep(np.random.randint(2, 8))
+				df = temp.filter([col for col in drbShots.columns if re.search('[2-3][A|M]$|ID$', col) != None])
+				df.columns = [
+					'{}_{}'.format(op.replace(' ', '_'), col) if re.search('ID$', col) == None else col for
+					col in df.columns]
+				shots = pd.concat([drb, df])
+				shots['GAME_DATE'] = date
+			shots = shots.groupby(['PLAYER_ID', 'GAME_DATE', 'PLAYER_LAST_TEAM_ID']).sum().reset_index()
+			final = pd.concat([final, drb])
+			if np.random.randint(0, 100) % 6 == 0:
+				time.sleep(np.random.randint(25, 95))
 		return final
-		
 
 	def get_open_shot_allowed(self,game_dates):
 		'''get the type of shots (ranges) that a team allows, will also get the number of wide-open and open 2 and 3pt looks a team allows.  This needs to be done day-by-day as the granularity is only by team, so we can not get game-by-game information.
@@ -410,7 +421,8 @@ class etl(base):
 		for ct, date in enumerate(tqdm(game_dates)):
 			try:
 				d = pd.to_datetime(date)
-				season = self.derive_season(d)
+				season = '{}-{}'.format(d.year, str(d.year + 1)[-2:]) if d.month >= 10 else '{}-{}'.format(d.year - 1,
+					str(d.year)[-2:])
 				wide = LeagueDashOppPtShot(date_from_nullable=date,
 					date_to_nullable=date, season=season,
 					close_def_dist_range_nullable='6+ Feet - Wide Open',timeout=60).get_data_frames()[0]
@@ -602,7 +614,7 @@ class etl(base):
 		plyers = list(set(plyers))
 		print('Need to get {} new players'.format(len(plyers)))
 		for ct,pid in enumerate(tqdm(plyers)):
-			pin = self.tracking_info(pid)
+			pin = self.get_player_info(pid)
 			#award = self.get_awards(pid)
 			#ply = pin.merge(award,how='left',on='PERSON_ID')
 			final = pd.concat([final,pin])
@@ -660,55 +672,52 @@ class etl(base):
 
 	def get_tracking_data(self,game_dates):
 		try:
-			dCols = ['PLAYER_ID', 'GAME_DATE','DRIVE_FGM', 'DRIVE_FGA', 'DRIVE_PASSES', 'DRIVE_AST', 'DRIVE_TOV', 'DRIVE_PF']
-			puCols = ['PLAYER_ID',  'PULL_UP_FGM', 'PULL_UP_FGA', 'PULL_UP_FG3M', 'PULL_UP_FG3A', ]
-			csCols = ['PLAYER_ID', 'CATCH_SHOOT_FGM', 'CATCH_SHOOT_FGA', 'CATCH_SHOOT_FG3M', 'CATCH_SHOOT_FG3A']
-			passCols = ['PLAYER_ID',   'PASSES_MADE', 'PASSES_RECEIVED', 'FT_AST', 'SECONDARY_AST', 'POTENTIAL_AST', 'AST_PTS_CREATED',
+			dCols = ['PLAYER_ID', 'TEAM_ID', 'DRIVE_FGM', 'DRIVE_FGA', 'DRIVE_PASSES', 'DRIVE_AST', 'DRIVE_TOV', 'DRIVE_PF']
+			puCols = ['PLAYER_ID', 'TEAM_ID', 'PULL_UP_FGM', 'PULL_UP_FGA', 'PULL_UP_FG3M', 'PULL_UP_FG3A', ]
+			csCols = ['PLAYER_ID', 'TEAM_ID', 'CATCH_SHOOT_FGM', 'CATCH_SHOOT_FGA', 'CATCH_SHOOT_FG3M', 'CATCH_SHOOT_FG3A']
+			passCols = ['PLAYER_ID', 'TEAM_ID', 'PASSES_MADE', 'PASSES_RECEIVED', 'FT_AST', 'SECONDARY_AST', 'POTENTIAL_AST', 'AST_PTS_CREATED',
 						'AST_ADJ']
-			ord =['PLAYER_ID',  'GAME_DATE', 'DRIVE_FGM',
+			ord =['PLAYER_ID', 'GAME_ID', 'TEAM_ID', 'OPP_ID', 'GAME_DATE', 'DRIVE_FGM',
 		   'DRIVE_FGA', 'DRIVE_PASSES', 'DRIVE_AST', 'DRIVE_TOV', 'DRIVE_PF',
 		   'PULL_UP_FG2M', 'PULL_UP_FG2A',
 		   'PULL_UP_FG3M', 'PULL_UP_FG3A', 'CATCH_SHOOT_FG2M', 'CATCH_SHOOT_FG2A',
 		   'CATCH_SHOOT_FG3M', 'CATCH_SHOOT_FG3A', 'PASSES_MADE',
 		   'PASSES_RECEIVED', 'FT_AST', 'SECONDARY_AST', 'POTENTIAL_AST',
 		   'AST_PTS_CREATED', 'AST_ADJ']
-			mergeCols = ['PLAYER_ID']
+			mergeCols = ['PLAYER_ID','TEAM_ID']
 			l = []
 			for date in tqdm(game_dates):
 
 				season = self.derive_season(date)
+				games = self.create_opp_games([date])
 				drives = LeagueDashPtStats(date_from_nullable = date,date_to_nullable = date,season=season,
 						pt_measure_type = 'Drives', player_or_team = 'Player',timeout=60).get_data_frames()[0]
-				drives['GAME_DATE'] = date
 				drives = drives.filter(dCols)
 				time.sleep(.8)
-				pullups = LeagueDashPtStats(date_from_nullable=date, date_to_nullable=date,season=season,
+				pullups = LeagueDashPtStats(date_from_nullable=date, date_to_nullable=date,
 										   pt_measure_type='PullUpShot', player_or_team='Player'
 											,timeout=60).get_data_frames()[0]
 				pullups = pullups.filter(puCols)
 				pullups['PULL_UP_FG2M'] = pullups['PULL_UP_FGM'] - pullups['PULL_UP_FG3M']
 				pullups['PULL_UP_FG2A'] = pullups['PULL_UP_FGA'] - pullups['PULL_UP_FG3A']
 				time.sleep(.8)
-				catchSht = LeagueDashPtStats(date_from_nullable=date, date_to_nullable=date,season=season,
+				catchSht = LeagueDashPtStats(date_from_nullable=date, date_to_nullable=date,
 										   pt_measure_type='CatchShoot', player_or_team='Player',
 											 timeout=60).get_data_frames()[0]
 				catchSht = catchSht.filter(csCols)
 				catchSht['CATCH_SHOOT_FG2M'] =  catchSht['CATCH_SHOOT_FGM'] - catchSht['CATCH_SHOOT_FG3M']
 				catchSht['CATCH_SHOOT_FG2A'] = catchSht['CATCH_SHOOT_FGA'] - catchSht['CATCH_SHOOT_FG3A']
 				time.sleep(.8)
-				passes = LeagueDashPtStats(date_from_nullable=date, date_to_nullable=date,season=season,
+				passes = LeagueDashPtStats(date_from_nullable=date, date_to_nullable=date,
 										   pt_measure_type='Passing', player_or_team='Player'
 										   ,timeout=60).get_data_frames()[0]
 				passes = passes.filter(passCols)
-
-				pop = self.get_open_player_shots([date])
-				games = drives.merge(pullups,how='left',on=mergeCols)
+				games = games.merge(drives,how='left',on='TEAM_ID')
+				games = games.merge(pullups,how='left',on=mergeCols)
 				games = games.merge(catchSht,how='left',on=mergeCols)
 				games = games.merge(passes,how='left',on=mergeCols)
-				games = games.merge(pop,how='left',on=mergeCols)
 				l.append(games)
 			final = pd.concat(l)
-			self.insert_data(final.filter(ord),'playerTracking')
 			logger.info("{}: loaded {} player tracking rows".format(date, len(games)))
 
 		except (KeyError, ValueError) as e:

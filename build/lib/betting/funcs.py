@@ -15,7 +15,7 @@ Creating general betting functions that will be shared between NFL and NBA
 '''
 class odds():
 
-    def __init__(self,configPath=os.path.join(os.path.dirname(__file__),'config.json')):
+    def __init__(self,configPath=os.path.join(os.path.dirname(__file__), 'config.json')):
         self.dct = json.loads(open(configPath,'r').read())
         self.freeApi = self.dct.get('oddsApi').get('free')
         self.paid = self.dct.get('oddsApi').get('paid')
