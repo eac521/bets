@@ -255,6 +255,7 @@ class data(base):
             except Exception:
                 pre_count = 0
             logger.info("derive {}: {} has {} rows".format(table_name,table_name, pre_count))
+            self.cur.execute("DROP TABLE IF EXISTS {}".format(table_name))
             with open(derived_tables.get(table_name).get('file')) as f:
                 self.cur.execute(f.read())
             for idx_name, idx_cols in derived_tables.get(table_name).get('indexes'):
@@ -301,15 +302,14 @@ class data(base):
         return series
 
     @staticmethod
-    def weighted_moving_avg(df, min, periods, col, grping):
+    def weighted_moving_avg(df, min_p, h, col, grping):
         '''
         Is an exponential moving average of a grouped feature
-        Inputs: dataframe, minimum number of periods to cover, typical number of periods, Column for exp weighting and the group by
+        Inputs: dataframe, minimum number of periods to cover, half life, Column for exp weighting and the group by
         Output: Dataframe with new column
         '''
 
-        df['{}Mv'.format(col)] = df.groupby(grping)[col].transform(
-            lambda x: x.rolling(periods, closed='left', min_periods=min, win_type='exponential').mean())
+        df['{}Mv'.format(col)] = df.groupby(grping)[col].transform(lambda x: x.shift(1).ewm(halflife=h, min_periods=min_p).mean())
         return df
 
     @staticmethod

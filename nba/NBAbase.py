@@ -16,7 +16,7 @@ class base():
                  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36'
 }
         #self.players = pd.read_sql('select * from roster_view')
-        self.teams = pd.read_sql('select cast(team_id as int) as team_id,teamAbrv from teams',self.conn)
+        self.teams = pd.read_sql('select cast(team_id as int) as team_id,teamAbrv from teams',self.conn).set_index('team_id').get('teamAbrv').to_dict()
         self.vlog = self.createVlog()
         self.vlog_r = self.createVlog(reverse=True)
 

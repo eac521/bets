@@ -307,8 +307,7 @@ class etl(base):
 		final = pd.DataFrame()
 		print('start player shots at {}'.format(time.strftime('%H:%M')))
 		for date in tqdm(game_dates):
-			d = pd.to_datetime(date)
-			season = '{}-{}'.format(d.year,str(d.year+1)[-2:]) if d.month>=10 else '{}-{}'.format(d.year-1,str(d.year)[-2:])
+			season = self.derive_season(date)
 			sht = LeagueDashPlayerShotLocations(date_from_nullable = date,
 				date_to_nullable = date,
 				season=season,period = qtr,timeout=60).get_data_frames()[0]

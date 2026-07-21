@@ -1,3 +1,4 @@
+
 CREATE TABLE IF NOT EXISTS opp_data
 AS
 SELECT team_id as opp_id,team as opponent, game_id, ra_fga as ra_fgallowed,

@@ -3,7 +3,7 @@ logging.basicConfig(
     filename='nba_pipeline.log',
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
+logger = logging.getLogger(__name__)
 import time
 import subprocess
 import argparse
@@ -35,7 +35,7 @@ def data_pull(run_date=None):
     etl.update_shots_allowed([run_date])
     time.sleep(np.random.randint(5,15))
     etl.update_teamLog(gids.GAME_ID.unique())
-    data.refresh_opp_data()
+    data.refresh_materialized_tables()
 
 
 def run_model(model_name,date=None):

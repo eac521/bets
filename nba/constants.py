@@ -12,6 +12,10 @@ NAME_MAP = {
     'Ronald Holland II': 'Ron Holland',
 }
 derived_tables = {
+    'team_def': {
+        'file': os.path.join(_BASE_DIR, 'data', 'sql', 'derive_team_def.sql'),
+        'indexes': [('idx_team_def', 'game_id, team_id')]
+    },
     'opp_data': {
         'file': os.path.join(_BASE_DIR, 'data', 'sql', 'derive_opp_table.sql'),
         'indexes': [('idx_opp_data', 'game_id, opp_id')]

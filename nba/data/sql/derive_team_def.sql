@@ -1,4 +1,5 @@
 
+
 CREATE TABLE IF NOT EXISTS  team_def AS
     WITH grpdShots AS (
     SELECT team_id, game_id,
@@ -41,11 +42,13 @@ case when julianday(log.game_date) - game1_date < 5 then 1 else 0 end) + 1 games
 case when julianday(log.game_date) - game3_date < 3 then 1 else 0 end +
 case when julianday(log.game_date) - game2_date < 3 then 1 else 0 end +
 case when julianday(log.game_date) - game1_date < 3 then 1 else 0 end) + 1 games_in_three,
---open shot rates    
+-- shot rates    
 open_fg3a / threes_fga as open3_rate,
 wide_fg3a / threes_fga as wide3_rate,
 open_fg2a / twos_fga as open2_rate,
 wide_fg2a / twos_fga as wide2_rate,
+ra_fgm * 1.0 / ra_fga as ra_rate,
+paint_fgm * 1.0 / paint_fga as paint_rate,
 --residuals vs oppMvAvgs
 RAAllowedVsAvg,
 PaintAllowedVsAvg,
