@@ -309,7 +309,8 @@ class data(base):
         Output: Dataframe with new column
         '''
 
-        df['{}Mv'.format(col)] = df.groupby(grping)[col].transform(lambda x: x.shift(1).ewm(halflife=h, min_periods=min_p).mean())
+        df['{}Mv'.format(col)] = df.sort_values(by='game_date').groupby(grping)[col].transform(lambda x: x.shift(1).ewm(halflife=h, min_periods=min_p).mean())
+        #df['{}Mv'.format(col)] = df.groupby(grping)[col].transform(lambda x: x
         return df
 
     @staticmethod
