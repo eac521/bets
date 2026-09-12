@@ -87,8 +87,8 @@ class odds():
         finalu = self.accumulateOdds(preds,outcomes,convert=False)
         finalu['over_under'] = 'Under'
         finalo['over_under'] = 'Over'
-        overs = finalo.join(preds[ids]).melt(id_vars = ['name','team','player_id','over_under'],value_vars = preds.columns, var_name = 'number',value_name = 'model_prob')
-        unders = finalu.join(preds[ids]).melt(id_vars = ['name','team','player_id','over_under'],value_vars = preds.columns, var_name = 'number',value_name = 'model_prob')
+        overs = finalo.join(preds[ids]).melt(id_vars = ['name','team','player_id','over_under'],value_vars = outcomes, var_name = 'number',value_name = 'model_prob')
+        unders = finalu.join(preds[ids]).melt(id_vars = ['name','team','player_id','over_under'],value_vars = outcomes, var_name = 'number',value_name = 'model_prob')
         final = pd.concat([overs, unders])
         final['number'] = np.where(final.over_under=='Over',final['number']-.5, final['number'] +.5)
         final = final[final['number']>0]

@@ -7,7 +7,6 @@ from .constants import NAME_MAP, derived_tables
 from .NBAbase import base
 import logging
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 '''
 This class is focused on what is already load via the nba api and stored in our database.
 Focus of this class is related to data for modeling. 
@@ -121,8 +120,8 @@ class data(base):
         dropCols = ['ra_fga', 'mid_fga', 'paint_fga','opp_id', 'crn_fga','abv_fga',]
         final.drop(dropCols, axis=1, inplace=True)
         # fill na for first game/opp game of season, adding in a 9 as this is similar to the all-star break
-        final.daysBetweenGames.fillna(9, inplace=True)
-        final.oppDaysLastGame.fillna(9, inplace=True)
+        final['daysBetweenGames'] = final['daysBetweenGames'].fillna(9)
+        final['oppDaysLastGame'] = final['oppDaysLastGame'].fillna(9)
 
         # final = final[final.game_date==date]
         return final
@@ -209,19 +208,19 @@ class data(base):
         Ouput: dataframe removing nans
         '''
         #replace with team averages:
-        team_cols = [col for col in df.select_dtypes(include='number').columns if 'Opp' in col]
-        player_cols = [col for col in df.select_dtypes(include='number').columns if 'Opp' not in col]
+        team_cols = [col for col in df.select_dtypes(include='number').columns if 'OPP' in col.upper()]
+        player_cols = [col for col in df.select_dtypes(include='number').columns if 'OPP' not in col.upper()]
         df[team_cols] = df[team_cols].fillna(df[team_cols].rolling(window=10, min_periods=1).mean())
-        df[player_cols] = df[player_cols].fillna(df[player_cols].rolling(window=10, min_periods=1).mean())
+        df[player_cols] = df[player_cols].fillna(df.groupby('player_id')[player_cols].transform(lambda x: x.rolling(10, min_periods=1).mean()))
         lgAvgs = pd.read_sql('''select season,
-                            sum(open_fg3a) * 1.0 / (sum(abv_fga) + sum(lc_fga) + sum(rc_fga)) open_fg3aLgSeason,
-                            sum(wide_fg3a) * 1.0 / (sum(abv_fga) + sum(lc_fga) + sum(rc_fga)) wide_fg3aLgSeason,
-                            avg(pace)     as                                                  paceLgSeason,
-                            avg(defensive_rating) as                                          def_rateLgSeason
-                                   from team_def
-                                   group by season
-                                   HAVING season is not Null
-                                ''', self.conn).set_index('season').reset_index().shift()
+                    sum(open_fg3a) * 1.0 / (sum(abv_fga) + sum(lc_fga) + sum(rc_fga)) open_fg3aLgSeason,
+                    sum(wide_fg3a) * 1.0 / (sum(abv_fga) + sum(lc_fga) + sum(rc_fga)) wide_fg3aLgSeason,
+                    avg(pace)     as                                                  paceLgSeason,
+                    avg(defensive_rating) as                                          def_rateLgSeason
+                            from team_def
+                            group by season
+                            HAVING season is not Null
+                        ''', self.conn).set_index('season').shift().reset_index()
 
         df.loc[:, 'mvAvgThrees'] = df['mvAvgThrees'].fillna(df['past3AvgThrees'])
         df.loc[:, 'mvAvgUsage'] = df['mvAvgUsage'].fillna(df['past3Usage'])

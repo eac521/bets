@@ -16,7 +16,7 @@ import streamlit as st
 
 
 from nba import NBAetl, NBAdata
-from nba.run import data_pull, data_pull
+from nba.run import data_pull
 
 etl = NBAetl.etl()
 data = NBAdata.data()

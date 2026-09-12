@@ -57,7 +57,7 @@ def run_model(model_name,date=None):
     preds = model.model.predict(sm.add_constant(td.filter(model.features), has_constant='add'))
     idInfo = model.data[model.data.game_date == date][['name','player_id','team','game_id']].copy()
     idInfo['name'] = data.standardize_names(idInfo['name'])
-    df = od.oddsTable(idInfo.join(preds))
+    df = od.oddsTable(idInfo[['name','player_id','team']].join(preds))
     preds['date'] = date
     preds['market'] = model.name
     final = idInfo.join(preds).melt(id_vars=['market', 'player_id', 'date'],
