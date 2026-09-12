@@ -1,4 +1,6 @@
 import logging
+import os
+os.makedirs('logs', exist_ok=True)
 logging.basicConfig(
     filename='nba_pipeline.log',
     level=logging.INFO,

@@ -1,5 +1,6 @@
 
-CREATE TABLE IF NOT EXISTS opp_data
+DROP TABLE IF EXISTS opp_data;
+CREATE TABLE opp_data
 AS
 SELECT team_id as opp_id,team as opponent, game_id, ra_fga as ra_fgallowed,
        paint_fga as paint_fgallowed, mid_fga as mid_fgallowed,
@@ -21,7 +22,7 @@ SELECT team_id as opp_id,team as opponent, game_id, ra_fga as ra_fgallowed,
            ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) AS mvAvgOppWide3,
        SUM(wide_fg3a) OVER (PARTITION BY season, team_id ORDER BY game_date
            ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) * 1.0 /
-       AVG(threes_fga) OVER (PARTITION BY season, team_id ORDER BY game_date
+       SUM(threes_fga) OVER (PARTITION BY season, team_id ORDER BY game_date
            ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) AS mvAvgOppWide3Rate,
      (SUM(wide_fg3a) OVER (PARTITION BY season, team_id ORDER BY game_date
            ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) + SUM(open_fg3a) OVER (PARTITION BY season, team_id ORDER BY game_date
@@ -29,9 +30,9 @@ SELECT team_id as opp_id,team as opponent, game_id, ra_fga as ra_fgallowed,
     SUM(threes_fga) OVER (PARTITION BY season, team_id ORDER BY game_date
            ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) AS mvGood3Rate,
        AVG(pace) OVER (PARTITION BY season, team_id ORDER BY game_date
-           ROWS UNBOUNDED PRECEDING) AS seasonOppPace,
+           ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS seasonOppPace,
        AVG(defensive_rating) OVER (PARTITION BY season, team_id ORDER BY game_date
-           ROWS UNBOUNDED PRECEDING) AS seasonOppDefRating,
+           ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS seasonOppDefRating,
        SUM(open_fg3a) OVER (PARTITION BY season, team_id ORDER BY game_date
            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) * 1.0 /
        SUM(threes_fga) OVER (PARTITION BY season, team_id ORDER BY game_date

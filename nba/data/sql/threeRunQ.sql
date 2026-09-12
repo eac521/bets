@@ -99,4 +99,8 @@ seasonOppPace,  seasonOppOpen3,  seasonOppWide3,  seasonOppDefRating, mvGood3Rat
 
 FROM pgames
 WHERE player_id in eligible_players
+WINDOW w6 AS (PARTITION BY season, player_id ORDER BY game_date ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING),
+       w12 AS (PARTITION BY season, player_id ORDER BY game_date ROWS BETWEEN 11 PRECEDING AND 1 PRECEDING),
+       wSeason AS (PARTITION BY season, player_id ORDER BY game_date ROWS BETWEEN 247 PRECEDING AND 1 PRECEDING),
+       wCareer AS (PARTITION BY player_id ORDER BY game_date ROWS BETWEEN 247 PRECEDING AND 1 PRECEDING)
 ORDER BY game_date

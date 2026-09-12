@@ -5,6 +5,8 @@ Entry point for the Streamlit app. Handles basicConfig, sidebar, and dashboard d
 Run with: streamlit run app.py
 """
 import logging
+import os
+os.makedirs('nba/logs', exist_ok=True)
 import sqlite3
 import re
 import datetime as dt
@@ -25,7 +27,7 @@ od = funcs.odds()
 # ── Logging (runs once on app startup, picked up by all module-level loggers) ──
 logging.basicConfig(
     filename='logs/nba_pipeline.log',
-    level=logging.INFO,
+    level=nba/logs/logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -264,3 +266,5 @@ if st.button('Calculate H2H'):
     st.dataframe(result)
 
 
+if __name__ == '__main__':
+    

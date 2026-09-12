@@ -1,5 +1,6 @@
 import sqlite3
 import pandas as pd
+import os
 from matplotlib.colors import LinearSegmentedColormap
 import logging
 logger = logging.getLogger(__name__)
