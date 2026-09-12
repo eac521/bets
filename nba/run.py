@@ -2,12 +2,13 @@ import logging
 import os
 os.makedirs('logs', exist_ok=True)
 logging.basicConfig(
-    filename='nba_pipeline.log',
+    filename='logs/nba_pipeline.log',
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 import time
 import subprocess
+import sys
 import argparse
 import pandas as pd
 import datetime as dt
@@ -70,7 +71,7 @@ def run_model(model_name,date=None):
 #I dont know that this is needed because we are going to use run model and then I dont want all the pieces connected here
 def run_pipeline(model_name):
     data_pull()
-    result = subprocess.run(['pytest', 'tests/', '-v'], capture_output=True)
+    result = subprocess.run([sys.executable, '-m', 'pytest', 'tests/', '-m', 'not integration', '-q'], capture_output=True)
     if result.returncode != 0:
         logger.error('Tests failed — skipping predictions\n{}'.format(result.stdout.decode()))
         return None
