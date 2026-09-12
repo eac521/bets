@@ -7,7 +7,7 @@ Run with: streamlit run app.py
 import logging
 import os
 os.makedirs('logs', exist_ok=True)
-import sqlite3
+
 import re
 import datetime as dt
 import pandas as pd
@@ -15,8 +15,8 @@ import streamlit as st
 
 
 
-from nba import NBAbase, NBAetl, NBAdata, NBAmodels
-from nba.run import run_pipeline,data_pull,run_model
+from nba import NBAetl, NBAdata
+from nba.run import data_pull, data_pull
 
 etl = NBAetl.etl()
 data = NBAdata.data()

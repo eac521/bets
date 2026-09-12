@@ -57,7 +57,7 @@ def run_model(model_name,date=None):
     preds = model.model.predict(sm.add_constant(td.filter(model.features), has_constant='add'))
     idInfo = model.data[model.data.game_date == date][['name','player_id','team','game_id']].copy()
     idInfo['name'] = data.standardize_names(idInfo['name'])
-    df = od.oddsTable(preds, idInfo)
+    df = od.oddsTable(idInfo.join(preds))
     preds['date'] = date
     preds['market'] = model.name
     final = idInfo.join(preds).melt(id_vars=['market', 'player_id', 'date'],
@@ -74,7 +74,7 @@ def run_pipeline(model_name, run_date=None):
     data_pull(run_date)
     result = subprocess.run([sys.executable, '-m', 'pytest', 'tests/', '-m', 'not integration', '-q'], capture_output=True)
     if result.returncode != 0:
-        logger.warning('Tests failed — missing values for {}\n{}'.format(run_date, result.stdout.decode()))
+        logger.warning('Validation tests failed; continuing with predictions')
     lines = run_model(model_name, run_date)
 
 
