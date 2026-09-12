@@ -17,13 +17,16 @@ setup(
     packages=find_packages(),
     
     # Dependencies 
-    install_requires=[
+        install_requires=[
         "pandas>=1.3.0",
         "numpy>=1.20.0",
-        "scikit-learn>=1.0.0",
+        "statsmodels>=0.13.0",
+        "matplotlib>=3.3.0",
+        "streamlit>=1.28.0",
         "requests>=2.25.0",
         "nba-api>=1.1.0",
         "tqdm>=4.60.0",
+        "pytest>=7.0.0",
     ],
     
     # Optional dependencies for development/notebooks

@@ -68,18 +68,25 @@ def run_model(model_name,date=None):
     etl.insert_data(final,'predictions',sort=True)
     return df
 
-#I dont know that this is needed because we are going to use run model and then I dont want all the pieces connected here
-def run_pipeline(model_name):
-    data_pull()
+#I dont know that this is needed because we are going to use run model 
+# and then I dont want all the pieces connected here
+def run_pipeline(model_name, run_date=None):
+    data_pull(run_date)
     result = subprocess.run([sys.executable, '-m', 'pytest', 'tests/', '-m', 'not integration', '-q'], capture_output=True)
     if result.returncode != 0:
-        logger.error('Tests failed — skipping predictions\n{}'.format(result.stdout.decode()))
-        return None
-    lines = run_model(model_name)
+        logger.warning('Tests failed — missing values for {}\n{}'.format(run_date, result.stdout.decode()))
+    lines = run_model(model_name, run_date)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', required=True)
+    parser.add_argument('--model', default='threes')
+    parser.add_argument('--date', default=None)
+    parser.add_argument('--step', default='all', choices=['data', 'model', 'all'])
     args = parser.parse_args()
-    run_pipeline(args.model)
+    if args.step == 'data':
+        data_pull(args.date)
+    elif args.step == 'model':
+        run_model(args.model, args.date)
+    else:
+        run_pipeline(args.model, args.date)
