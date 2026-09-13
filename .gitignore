@@ -29,3 +29,5 @@ nba/data/pbp
 nba/data/pickle
 nba/data/parquetbuild/
 dist/
+build/
+dist/
