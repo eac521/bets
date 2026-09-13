@@ -27,4 +27,5 @@ nba/data/csv
 nba/data/files
 nba/data/pbp
 nba/data/pickle
-nba/data/parquet
+nba/data/parquetbuild/
+dist/
