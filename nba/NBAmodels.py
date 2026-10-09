@@ -13,8 +13,8 @@ class models(base):
         super().__init__()
         models_configs = {
             'threes': {
-                'model_path': os.path.join(_BASE_DIR, 'data', 'model', '2025-26Run', 'threeModel.pkl'),
-                'scaler_path': os.path.join(_BASE_DIR, 'data', 'model', '2025-26Run', 'scaler.pkl'),
+                'model_path': os.path.join(_BASE_DIR, 'data', 'model', '2026-27Run', 'threeModel.pkl'),
+                'scaler_path': os.path.join(_BASE_DIR, 'data', 'model', '2026-27Run', 'scaler.pkl'),
                 'data_path': os.path.join(_BASE_DIR, 'data', 'sql', 'threeRunQ.sql'),
             },
             'points': {

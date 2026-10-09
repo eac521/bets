@@ -88,7 +88,7 @@ class data(base):
         Inputs: str for game date formatted as YYYY-MM-DD
         Output: DataFrame of your X values
         '''
-        crnBin = pd.read_pickle(os.path.join(_BASE_DIR, 'data', 'model', '2025-26Run', 'cornerBin.pickle'))
+        crnBin = pd.read_pickle(os.path.join(_BASE_DIR, 'data', 'model', '2026-27Run', 'cornerBin.pkl'))
         # team defense needs to be done here for all moving averages/coeff vars as it moves to player level after this.
         tmsa = self.rolling_team_sa()
         tmsa = self.weighted_moving_avg(tmsa, 5, 15, 'crn_fgallowed', 'opp_id')
