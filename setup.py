@@ -27,6 +27,7 @@ setup(
         "nba-api>=1.1.0",
         "tqdm>=4.60.0",
         "pytest>=7.0.0",
+        "optbinning>=0.19.0",
     ],
     
     # Optional dependencies for development/notebooks

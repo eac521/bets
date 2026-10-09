@@ -2,8 +2,9 @@ import pandas as pd
 import numpy as np
 import time
 import re
+import os
 from tqdm import tqdm
-from .constants import NAME_MAP, derived_tables
+from .constants import NAME_MAP, derived_tables,_BASE_DIR
 from .NBAbase import base
 import logging
 logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ class data(base):
         Inputs: str for game date formatted as YYYY-MM-DD
         Output: DataFrame of your X values
         '''
-        crnBin = pd.read_pickle('../nba/data/model/2025-26Run/cornerBin.pickle')
+        crnBin = pd.read_pickle(os.path.join(_BASE_DIR, 'data', 'model', '2025-26Run', 'cornerBin.pickle'))
         # team defense needs to be done here for all moving averages/coeff vars as it moves to player level after this.
         tmsa = self.rolling_team_sa()
         tmsa = self.weighted_moving_avg(tmsa, 5, 15, 'crn_fgallowed', 'opp_id')

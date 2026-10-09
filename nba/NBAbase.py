@@ -9,7 +9,7 @@ class base():
 
     def __init__(self):
         #self.db = 'data/database/nba.db'
-        self.db = '/Users/ericcoxon/Dropbox/backups/database/nba.db'
+        self.db = os.environ.get('NBA_DB_PATH', 'nba/data/database/nba.db')
         self.conn = sqlite3.connect(self.db)
         self.cur = self.conn.cursor()
         self.showTables = pd.read_sql("SELECT * FROM sqlite_master WHERE type in ('table','view');",self.conn)

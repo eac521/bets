@@ -1,9 +1,11 @@
 import pickle
+import os
 import pandas as pd
 import numpy as np
 import datetime as dt
 from .NBAbase import base
 from .NBAdata import data
+from .constants import _BASE_DIR
 
 ## to be instantiated for each model individually
 class models(base):
@@ -11,19 +13,19 @@ class models(base):
         super().__init__()
         models_configs = {
             'threes': {
-                'model_path': '../nba/data/model/2025-26Run/threeModel.pkl',
-                'scaler_path': '../nba/data//model/2025-26Run/scaler.pkl',
-                'data_path': '../nba/data/sql/threeRunQ.sql',
+                'model_path': os.path.join(_BASE_DIR, 'data', 'model', '2025-26Run', 'threeModel.pkl'),
+                'scaler_path': os.path.join(_BASE_DIR, 'data', 'model', '2025-26Run', 'scaler.pkl'),
+                'data_path': os.path.join(_BASE_DIR, 'data', 'sql', 'threeRunQ.sql'),
             },
             'points': {
-                'model_path': '../nba/data/model/pointsModel.pkl',
-                'scaler_path': '../nba/data/model/scalValsPoints.pkl',
-                'data_path': '../nba/data/sql/query.sql'
+                'model_path': os.path.join(_BASE_DIR, 'data', 'model', '2025-26Run', 'pointModel.pkl'),
+                'scaler_path': os.path.join(_BASE_DIR, 'data', 'model', '2025-26Run', 'pointScaler.pkl'),
+                'data_path': os.path.join(_BASE_DIR, 'data', 'sql', 'pointQ.sql'),
             },
             'spread': {
-                'model_path': '../nba/data/model/spreadModel.pkl',
-                'scaler_path': '../nba/data/model/scalValsSpread.pkl',
-                'data_path': '../nba/data/sql/query.sql'
+                'model_path': os.path.join(_BASE_DIR, 'data', 'model', '2025-26Run', 'spreadModel.pkl'),
+                'scaler_path': os.path.join(_BASE_DIR, 'data', 'model', '2025-26Run', 'spreadScaler.pkl'),
+                'data_path': os.path.join(_BASE_DIR, 'data', 'sql', 'spreadQ.sql'),
             }
         }
 
