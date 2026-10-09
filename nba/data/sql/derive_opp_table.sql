@@ -26,7 +26,7 @@ SELECT team_id as opp_id,team as opponent, game_id, ra_fga as ra_fgallowed,
            ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) AS mvAvgOppWide3Rate,
      (SUM(wide_fg3a) OVER (PARTITION BY season, team_id ORDER BY game_date
            ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) + SUM(open_fg3a) OVER (PARTITION BY season, team_id ORDER BY game_date
-           ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)) / 
+           ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING)) * 1.0 /
     SUM(threes_fga) OVER (PARTITION BY season, team_id ORDER BY game_date
            ROWS BETWEEN 6 PRECEDING AND 1 PRECEDING) AS mvGood3Rate,
        AVG(pace) OVER (PARTITION BY season, team_id ORDER BY game_date

@@ -257,7 +257,7 @@ class data(base):
             logger.info("derive {}: {} has {} rows".format(table_name,table_name, pre_count))
             self.cur.execute("DROP TABLE IF EXISTS {}".format(table_name))
             with open(derived_tables.get(table_name).get('file')) as f:
-                self.cur.execute(f.read())
+                self.cur.executescript(f.read())
             for idx_name, idx_cols in derived_tables.get(table_name).get('indexes'):
                 self.cur.execute("CREATE INDEX IF NOT EXISTS {} ON {}({})".format(idx_name, table_name, idx_cols))
             self.conn.commit()

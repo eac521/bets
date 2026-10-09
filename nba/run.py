@@ -52,10 +52,10 @@ def run_model(model_name,date=None):
     pipe = pipes.get(model_name)
     td = pipe(model.data)
     td = data.clean_na(td)
-    td = td[td.game_date == date]
+    td = td[(td.game_date == date) & (td.eligible == 1)]
     td = model.standRobust_scaler(td)
     preds = model.model.predict(sm.add_constant(td.filter(model.features), has_constant='add'))
-    idInfo = model.data[model.data.game_date == date][['name','player_id','team','game_id']].copy()
+    idInfo = model.data[(model.data.game_date == date) & (model.data.eligible == 1)][['name','player_id','team','game_id']].copy()
     idInfo['name'] = data.standardize_names(idInfo['name'])
     df = od.oddsTable(idInfo[['name','player_id','team']].join(preds))
     preds['date'] = date
