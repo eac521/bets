@@ -21,7 +21,7 @@ class odds():
         self.paid = self.dct.get('oddsApi').get('paid')
         self.nbaEvents = 'https://api.the-odds-api.com/v4/sports/basketball_nba/events?apiKey={}&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'
         self.nflEvents = 'https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events?apiKey={}&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'
-        self.todayISO = (dt.datetime.now()).strftime('%Y-%m-%dT%H:%M:00Z')
+        self.todayISO = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:00Z')
         self.tomorISO = (dt.datetime.now() + dt.timedelta(1)).strftime('%Y-%m-%dT%H:%M:00z')
         self.budget = 1000
         self.kellyVal = .125
@@ -110,9 +110,9 @@ class odds():
                     temp.columns = ['over_under', 'name', 'price', 'number']
                     temp['book'] = bk
                     l.append(temp)
-        pd.concat(l)
+        df = pd.concat(l)
         odf = df.pivot_table(index=['name', 'number', 'over_under'], columns=['book']).reset_index()
-        odf.columns = [c[1] if c[1] != '' else c[0] for c in odf.columns]
+        odf.columns = [(c[1] if c[1] != '' else c[0]).replace(' ', '_') for c in odf.columns]  
         return odf
 
     def bet_table(self, lines, odf, sportsbooks=None):
@@ -127,7 +127,7 @@ class odds():
             kelly = [self.kellyCrit(p, odd, False) for p, odd in zip(final.model_prob, final[odds_col])]
             final['{}EV'.format(prefix)] = [self.ev(p, odd) for p, odd in
                                             zip(final.model_prob, final[odds_col].replace(0, 1))]
-            final['{}Amount'.format(prefix)] = [round(x * self.budget * self.kellyVal, 2) for x in kelly]
+            final['{}Amount'.format(prefix)] = [round(x, 2) for x in kelly]
         return final
 
     def twoWayOdds(self,df,numCol,book):
@@ -184,7 +184,6 @@ class odds():
         mult = odds / 100 if odds > 0 else 100/abs(odds)
         wp = self.convertOddsToPercent(winProb) if abs(winProb) > 0 else winProb
         l = 1 - wp
-        print(mult,wp)
         return wp * mult - l
 
 

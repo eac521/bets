@@ -55,7 +55,7 @@ def test_features():
 
 def test_kelly_fraction_bounded(bo):
     """Kelly should never recommend betting > 100% of bankroll."""
-    fraction = bo.kellyCrit(.5,200)
+    fraction = bo.kellyCrit(.5, 200, False) / (bo.budget * bo.kellyVal)
     assert 0 <= fraction <= 1.0
 
 @pytest.mark.integration

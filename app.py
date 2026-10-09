@@ -179,8 +179,8 @@ else:
         filtered['wager'] =  (filtered[amt_cols].max(axis=1) / 0.25).round() * 0.25
 
         # Display with inline editing
-        ev_config = {col: st.column_config.NumberColumn(col, format='%.2f%%')
-                     for col in filtered.columns if col.endswith('EV')}
+        ev_config = {col: st.column_config.NumberColumn(col, format='percent') for col in filtered.columns if col.endswith('EV')}
+        ev_config.update({col: st.column_config.NumberColumn(col, format='dollar') for col in filtered.columns if col.endswith('Amount')})
         edited = st.data_editor(
             filtered,
             column_config={
