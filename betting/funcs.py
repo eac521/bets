@@ -182,7 +182,7 @@ class odds():
         winProb * odds/100 - (1-winProb)
         '''
         mult = odds / 100 if odds > 0 else 100/abs(odds)
-        wp = self.convertOddsToPercent(winProb) if abs(winProb) > 0 else winProb
+        wp = self.convertOddsToPercent(winProb) if abs(winProb) > 1 else winProb
         l = 1 - wp
         return wp * mult - l
 
