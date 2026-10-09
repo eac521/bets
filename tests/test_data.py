@@ -72,3 +72,14 @@ def test_log_counts(etl):
                        FROM plyrLogs WHERE game_date BETWEEN '{}' AND '{}' '''.format(start_date, end_date),
                      etl.conn)
     assert len(shots) == len(team) == len(player)
+
+def test_derived_tables_sane(etl):
+    '''
+    Derived tables were rebuilt after the latest load, and share features are shares rather than counts
+    '''
+    gaps = pd.read_sql('''SELECT (SELECT COUNT(*) FROM plyrLogs) - (SELECT COUNT(*) FROM pgames) AS pgames_gap,
+                                 (SELECT COUNT(*) FROM team_def) - (SELECT COUNT(*) FROM opp_data) AS opp_data_gap''', etl.conn)
+    assert (gaps == 0).all().all(), 'derived tables are stale: {}'.format(gaps.to_dict('records'))
+    shares = pd.read_sql('''SELECT mvGood3Rate, mvAvgOppWide3Rate, mvAvgOppOpen3Rate, seasonOppOpen3, seasonOppWide3
+                           FROM opp_data''', etl.conn)
+    assert shares.min().min() >= 0 and shares.max().max() <= 1.2, 'share out of range: {}'.format(shares.max().round(2).to_dict())

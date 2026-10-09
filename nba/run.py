@@ -32,6 +32,8 @@ def data_pull(run_date=None):
     '''
     run_date = run_date or (dt.datetime.today() + pd.to_timedelta(-1, unit='day')).strftime(format='%Y-%m-%d')
     gids = etl.get_games(run_date,run_date)
+    if gids.empty:
+        return logger.info('No games on {}, skipping data pull'.format(run_date))
     print('Updating for {}'.format(run_date))
     etl.update_player_log([run_date])
     time.sleep(np.random.randint(5,15))
@@ -53,6 +55,8 @@ def run_model(model_name,date=None):
     td = pipe(model.data)
     td = data.clean_na(td)
     td = td[(td.game_date == date) & (td.eligible == 1)]
+    if td.empty:
+        return logger.info('No eligible players on {}, no predictions made'.format(date))
     td = model.standRobust_scaler(td)
     preds = model.model.predict(sm.add_constant(td.filter(model.features), has_constant='add'))
     idInfo = model.data[(model.data.game_date == date) & (model.data.eligible == 1)][['name','player_id','team','game_id']].copy()
