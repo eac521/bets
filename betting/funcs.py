@@ -22,7 +22,7 @@ class odds():
         self.nbaEvents = 'https://api.the-odds-api.com/v4/sports/basketball_nba/events?apiKey={}&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'
         self.nflEvents = 'https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events?apiKey={}&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'
         self.todayISO = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:00Z')
-        self.tomorISO = (dt.datetime.now() + dt.timedelta(1)).strftime('%Y-%m-%dT%H:%M:00z')
+        self.tomorISO = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(1)).strftime('%Y-%m-%dT%H:%M:00Z')
         self.budget = 1000
         self.kellyVal = .125
         self.parlayBudget = 750
