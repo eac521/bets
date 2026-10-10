@@ -71,12 +71,14 @@ class etl(base):
 		rbs = self.get_rebounds(game_dates)
 		time.sleep(np.random.randint(1, 15))
 		adv = self.get_advanced_box(game_dates)
+		if adv.empty:
+			logger.warning('No advanced box scores for {}, writing player logs without them'.format(', '.join(game_dates)))
+			adv = pd.DataFrame(columns=['GAME_ID', 'PLAYER_ID', 'offensiveRating', 'defensiveRating', 'usagePercentage', 'pace', 'possessions', 'Starter']).astype({'GAME_ID': log.GAME_ID.dtype, 'PLAYER_ID': log.PLAYER_ID.dtype})
 		time.sleep(np.random.randint(1, 15))
 		shts = self.tracking_shot_spots(game_dates)
 		logrbs = log.merge(rbs, how='left', on=['PLAYER_ID', 'GAME_ID', 'TEAM_ID', 'GAME_DATE']).fillna(0)
 		logRbsSht = logrbs.merge(shts, how='left', on=['TEAM_ID', 'PLAYER_ID', 'GAME_DATE'])
-		advBskt = adv.merge(bskt, how='left', on=['PLAYER_ID', 'GAME_ID'])
-		final = logRbsSht.merge(advBskt, how='left', on=['PLAYER_ID', 'GAME_ID'])
+		final = logRbsSht.merge(adv, how='left', on=['PLAYER_ID', 'GAME_ID']).merge(bskt, how='left', on=['PLAYER_ID', 'GAME_ID'])
 		final.columns = ['player_id', 'team_id', 'game_id', 'game_date', 'min', 'ftm', 'fta', 'reb', 'ast', 'tov',
 						 'stl', 'blk', 'blka', 'pf',
 						 'pfd', 'pts', 'plus_minus', 'dd2', 'td3', 'oreb', 'oreb_contest', 'oreb_chances',
