@@ -339,14 +339,9 @@ class etl(base):
 			else:
 				advbox = BoxScoreAdvancedV3(gid,
 				start_period=qtr,end_period=qtr,timeout=60).get_data_frames()[0].rename(columns={'gameId':'GAME_ID','personId':'PLAYER_ID'})
-			advbox = advbox.filter(advcols)
+			advbox['Starter'] = np.where(advbox['position'].fillna('').str.strip() != '', 1, 0)
+			advbox = advbox.filter(advcols + ['Starter'])
 			advbox.drop(advbox[advbox.possessions==0].index,inplace=True)
-			try:
-				temp = pd.concat(GameRotation(gid).get_data_frames())
-				advbox['Starter'] = np.where(advbox.PLAYER_ID.isin(temp[temp.IN_TIME_REAL==0].PERSON_ID), 1, 0)
-			except (ValueError, KeyError) as err:
-				logger.warning('GameRotation failed for {} ({}), Starter left empty'.format(gid, type(err).__name__))
-				advbox['Starter'] = np.nan
 			df = pd.concat([df,advbox])
 			time.sleep(np.random.choice(range(1,5)))
 		print('completed adv box at {}'.format(time.strftime('%H:%M')))
