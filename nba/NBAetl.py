@@ -341,10 +341,13 @@ class etl(base):
 				start_period=qtr,end_period=qtr,timeout=60).get_data_frames()[0].rename(columns={'gameId':'GAME_ID','personId':'PLAYER_ID'})
 			advbox = advbox.filter(advcols)
 			advbox.drop(advbox[advbox.possessions==0].index,inplace=True)
-			temp = pd.concat(GameRotation(gid).get_data_frames())
-			lst = temp[temp.IN_TIME_REAL==0].PERSON_ID.values.tolist()
+			try:
+				temp = pd.concat(GameRotation(gid).get_data_frames())
+				advbox['Starter'] = np.where(advbox.PLAYER_ID.isin(temp[temp.IN_TIME_REAL==0].PERSON_ID), 1, 0)
+			except (ValueError, KeyError) as err:
+				logger.warning('GameRotation failed for {} ({}), Starter left empty'.format(gid, type(err).__name__))
+				advbox['Starter'] = np.nan
 			df = pd.concat([df,advbox])
-			df['Starter'] = np.where(df.PLAYER_ID.isin(lst),1,0)
 			time.sleep(np.random.choice(range(1,5)))
 		print('completed adv box at {}'.format(time.strftime('%H:%M')))
 		return df
