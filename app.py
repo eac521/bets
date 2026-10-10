@@ -41,6 +41,7 @@ test_mode = st.sidebar.checkbox('Test Mode',value=True)
 test_date = None
 if test_mode:
     test_date = st.sidebar.date_input('Test Date', value=dt.date(2026, 3, 23))
+run_date = str(test_date) if test_mode else dt.datetime.today().strftime('%Y-%m-%d')
 st.sidebar.title('Settings')
 active_user = st.sidebar.selectbox('User', USERS)
 bankroll = st.sidebar.number_input(
@@ -96,16 +97,16 @@ def create_todays_bets(MODEL_NAME,date=None,value=0,test=False,bankroll=1000):
 
 
 @st.cache_data(ttl=300)
-def load_current_plays(user):
+def load_current_plays(user, date):
     """Load bets already placed today so they drop off the active list."""
     query = """
-        SELECT player_id, over_under
+        SELECT CAST(player_id AS INTEGER) AS player_id, over_under
         FROM bets
-        WHERE date = DATE('now')
+        WHERE date = ?
         AND user = ?
         AND bet_amount is not Null
     """
-    df = pd.read_sql(query, etl.conn, params=[user])
+    df = pd.read_sql(query, etl.conn, params=[date, user])
     return df
 
 
@@ -116,11 +117,21 @@ if test_mode:
 else:
     plays = create_todays_bets(MODEL_NAME,bankroll=bankroll)
 
+games = pd.read_sql("""
+    SELECT GROUP_CONCAT(teamAbrv) as teams,
+           MAX(CASE WHEN t.home = 0 THEN tms.teamAbrv END) || ' @ ' ||
+           MAX(CASE WHEN t.home = 1 THEN tms.teamAbrv END) AS game_label
+    FROM teamLog t
+    LEFT JOIN teams tms USING (team_id)
+    WHERE t.game_date = ?
+    GROUP BY t.game_id
+""", etl.conn, params=[run_date])
+edited = None
 if plays.empty:
     st.info('No predictions available for today. Data may not have been refreshed yet.')
 else:
     # Filter out bets already placed by this user
-    open_bets = load_current_plays(active_user)
+    open_bets = load_current_plays(active_user, run_date)
     if not open_bets.empty:
         placed_keys = set(zip(open_bets['player_id'], open_bets['over_under']))
         predictions = plays[
@@ -139,15 +150,6 @@ else:
         display_cols =['name', 'over_under', 'number', 'prob'] + [b for b in BOOKS if b in predictions.columns]
         # Add filter controls
         col_f1, col_f2 = st.columns(2)
-        games = pd.read_sql("""
-            SELECT GROUP_CONCAT(teamAbrv) as teams,
-                   MAX(CASE WHEN t.home = 0 THEN tms.teamAbrv END) || ' @ ' ||
-                   MAX(CASE WHEN t.home = 1 THEN tms.teamAbrv END) AS game_label
-            FROM teamLog t
-            LEFT JOIN teams tms USING (team_id)
-            WHERE t.game_date = {}
-            GROUP BY t.game_id
-        """.format("'"+str(test_date)+"'" if test_date is not None else "DATE ('now')"), etl.conn)
 
         with col_f1:
             game_filter = st.selectbox('Game', ['All'] + games.game_label.tolist())
@@ -193,14 +195,14 @@ else:
             width = 'content',
             hide_index=True,
         )
-if st.button('Save Bets'):
+if st.button('Save Bets') and edited is not None:
     selected = edited[edited['bet'] == True]
     if selected.empty:
         st.warning('No bets selected.')
     elif (selected['book'] == 'None').any():
         st.error('Select a book for all checked bets.')
     else:
-        bet_date = str(test_date) if test_mode else dt.datetime.today().strftime('%Y-%m-%d')
+        bet_date = run_date
         save_df = pd.DataFrame({
             'player_id': selected['player_id'].values,
             'date': bet_date,
@@ -220,8 +222,11 @@ if st.button('Save Bets'):
 st.divider()
 st.header('Special Markets')
 game_filter = st.selectbox('Select Game', ['All'] + games.game_label.tolist())
-special_market = get_preds(MODEL_NAME,test_date, pivot = True)
-special_market = special_market[special_market['team'].isin(game_filter.split(' @ '))]
+all_preds = get_preds(MODEL_NAME, run_date, pivot = True)
+if all_preds.empty:
+    st.info('No predictions for {}.'.format(run_date))
+    st.stop()
+special_market = all_preds[all_preds['team'].isin(game_filter.split(' @ '))]
 
 @st.cache_data
 def run_game_leaders(game_filter, special_market):
