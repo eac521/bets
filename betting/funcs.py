@@ -38,23 +38,24 @@ class odds():
                 'markets': 'player_points,player_points_alternate',
                 'eventURL':self.nbaEvents}
         }
-    def oddsData(self, eventURL,usePaid=False):
+    def oddsData(self, eventURL, usePaid=False, cost=1):
         '''
-        ISO Formatted dates for today and tomorrow returns the games that will be played today ids for odds pulls
-        Inputs: isoformatted dates for today and tomorrow
-        Output: list of game ids
+        Gets today's game ids for the odds pulls. Uses the free key while it has enough requests left for the whole slate
+        (games x cost per game), otherwise, or if the free key errors, the paid key.
+        Inputs: events url, force the paid key, request cost per game (number of markets pulled)
+        Output: list of game ids, api key to use
         '''
-        if int(requests.get(eventURL.format(self.freeApi,self.todayISO,self.tomorISO)).headers['x-requests-used'])>=490 or usePaid:
-            print('Free is out')
-            r = requests.get(eventURL.format(self.paid,self.todayISO,self.tomorISO))
-            print(r.headers)
-            key = self.paid
-        else:
-            r = requests.get(eventURL.format(self.freeApi,self.todayISO,self.tomorISO))
-            print('Free:',r.headers)
-            key = self.freeApi
-
-        return [d['id'] for d in r.json()],key
+        free = requests.get(eventURL.format(self.freeApi, self.todayISO, self.tomorISO))
+        remaining = int(free.headers.get('x-requests-remaining', 0)) if free.ok else 0
+        events = free.json() if free.ok else []
+        needed = len(events) * cost
+        if usePaid or not free.ok or remaining < needed:
+            print('Using paid key: free has {} requests left, slate needs {} (status {})'.format(remaining, needed, free.status_code))
+            r = requests.get(eventURL.format(self.paid, self.todayISO, self.tomorISO))
+            r.raise_for_status()
+            return [d['id'] for d in r.json()], self.paid
+        print('Using free key: {} requests left, slate needs {}'.format(remaining, needed))
+        return [d['id'] for d in events], self.freeApi
 
 
     def kellyCrit(self,prob,odds,show=True):
@@ -98,7 +99,7 @@ class odds():
         url = self.build_odds_url(market)
         eventURL = self.market_vars.get(market).get('eventURL')
         df = pd.DataFrame()
-        events, akey = self.oddsData(eventURL, usePaid=True)
+        events, akey = self.oddsData(eventURL, cost=len(self.market_vars.get(market).get('markets').split(',')))
         l = []
         for event in events:
             r = requests.get(url.format(event, akey))
