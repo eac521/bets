@@ -16,7 +16,7 @@ from nba_api.stats.endpoints import (
 	LeagueDashTeamShotLocations, LeagueDashOppPtShot,
 	LeagueDashPlayerShotLocations, PlayerGameLogs, TeamInfoCommon,
 	leaguegamefinder, LeagueDashPtStats, PlayerIndex,
-	CommonPlayerInfo, PlayerAwards, GameRotation, LeagueDashPlayerPtShot
+	CommonPlayerInfo, PlayerAwards, GameRotation, LeagueDashPlayerPtShot, ScheduleLeagueV2
 )
 from nba_api.live.nba.endpoints import BoxScore
 from .NBAbase import base
@@ -212,10 +212,15 @@ class etl(base):
 		'''
 		sDate = season[:4]
 		startDate = '{}-10-19'.format(sDate)
-		r = requests.get("http://data.nba.com/data/10s/v2015/json/mobile_teams/nba/{}/league/00_full_schedule.json".format(sDate))
-		h = [[v['gdte'], v['gid'],str(v['h']['tid']),1] for k in r.json()['lscd'] for v in k['mscd']['g'] if v['gdte']>startDate]
-		a = [[v['gdte'], v['gid'],str(v['v']['tid']),0] for k in r.json()['lscd'] for v in k['mscd']['g'] if v['gdte']>startDate]
-		df = pd.DataFrame(data=h+a, columns = ['game_date','game_id','team_id','home'])
+		s = ScheduleLeagueV2(season=season).get_data_frames()[0]
+		s['game_date'] = pd.to_datetime(s.gameDate).dt.strftime('%Y-%m-%d')
+		# regular-season games only (gameId 002...); Cup knockout slots have no team until the matchups are set
+		s = s[(s.gameId.astype(str).str[:3] == '002') & (s.game_date > startDate)]
+		h = s[s.homeTeam_teamId > 0][['game_date', 'gameId', 'homeTeam_teamId']].assign(home=1)
+		a = s[s.awayTeam_teamId > 0][['game_date', 'gameId', 'awayTeam_teamId']].assign(home=0)
+		h.columns = a.columns = ['game_date', 'game_id', 'team_id', 'home']
+		df = pd.concat([h, a], ignore_index=True)
+		df['team_id'] = df.team_id.astype(int).astype(str)
 		return df
 
 	def get_opp_shot_spot(self, game_dates):
