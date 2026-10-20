@@ -3,13 +3,14 @@ import pandas as pd
 import os
 from matplotlib.colors import LinearSegmentedColormap
 import logging
+from .constants import _BASE_DIR
 logger = logging.getLogger(__name__)
 class base():
 
 
     def __init__(self):
         #self.db = 'data/database/nba.db'
-        self.db = os.environ.get('NBA_DB_PATH', 'nba/data/database/nba.db')
+        self.db = os.environ.get('NBA_DB_PATH', os.path.join(_BASE_DIR, 'data', 'database', 'nba.db'))
         self.conn = sqlite3.connect(self.db)
         self.cur = self.conn.cursor()
         self.showTables = pd.read_sql("SELECT * FROM sqlite_master WHERE type in ('table','view');",self.conn)

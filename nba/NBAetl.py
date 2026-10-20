@@ -16,7 +16,7 @@ from nba_api.stats.endpoints import (
 	LeagueDashTeamShotLocations, LeagueDashOppPtShot,
 	LeagueDashPlayerShotLocations, PlayerGameLogs, TeamInfoCommon,
 	leaguegamefinder, LeagueDashPtStats, PlayerIndex,
-	CommonPlayerInfo, PlayerAwards, GameRotation, LeagueDashPlayerPtShot
+	CommonPlayerInfo, PlayerAwards, GameRotation, LeagueDashPlayerPtShot, ScheduleLeagueV2
 )
 from nba_api.live.nba.endpoints import BoxScore
 from .NBAbase import base
@@ -211,11 +211,16 @@ class etl(base):
 		Output: Dataframe with columns game_date, game_id, team_id,home
 		'''
 		sDate = season[:4]
-		startDate = '{}-10-20'.format(sDate)
-		r = requests.get("http://data.nba.com/data/10s/v2015/json/mobile_teams/nba/{}/league/00_full_schedule.json".format(sDate))
-		h = [[v['gdte'], v['gid'],str(v['h']['tid']),1] for k in r.json()['lscd'] for v in k['mscd']['g'] if v['gdte']>startDate]
-		a = [[v['gdte'], v['gid'],str(v['v']['tid']),0] for k in r.json()['lscd'] for v in k['mscd']['g'] if v['gdte']>startDate]
-		df = pd.DataFrame(data=h+a, columns = ['game_date','game_id','team_id','home'])
+		startDate = '{}-10-19'.format(sDate)
+		s = ScheduleLeagueV2(season=season).get_data_frames()[0]
+		s['game_date'] = pd.to_datetime(s.gameDate).dt.strftime('%Y-%m-%d')
+		# regular-season games only (gameId 002...); Cup knockout slots have no team until the matchups are set
+		s = s[(s.gameId.astype(str).str[:3] == '002') & (s.game_date > startDate)]
+		h = s[s.homeTeam_teamId > 0][['game_date', 'gameId', 'homeTeam_teamId']].assign(home=1)
+		a = s[s.awayTeam_teamId > 0][['game_date', 'gameId', 'awayTeam_teamId']].assign(home=0)
+		h.columns = a.columns = ['game_date', 'game_id', 'team_id', 'home']
+		df = pd.concat([h, a], ignore_index=True)
+		df['team_id'] = df.team_id.astype(int).astype(str)
 		return df
 
 	def get_opp_shot_spot(self, game_dates):
@@ -581,10 +586,12 @@ class etl(base):
 			'lc_fga','rc_fgm','rc_fga','abv_fgm','abv_fga']
 		return df
 
-	def update_player_info(self,seasons):
+	def update_player_info(self,seasons,start_date=None):
 		'''Need to run this when getting new players as well
-		Inputs: list of season
+		Inputs: list of season; start_date (YYYY-MM-DD, opening night) to also refresh rosters at season start
 		Output: Update of how many rows where added
+		Season start: update_player_info(['2026-27'], start_date='2026-10-20') closes last season's open roster entries
+		at its final game date and opens one per rostered player for the last season in the list. Safe to re-run.
 		'''
 		curdb = [x[0] for x in self.conn.execute('select distinct player_id from players').fetchall()]
 		final = pd.DataFrame()
@@ -596,12 +603,13 @@ class etl(base):
 		for season in seasons:
 			pi = PlayerIndex(season=season).get_data_frames()[0]
 			pi['PERSON_ID'] = pi.PERSON_ID.astype(str)
+			roster = pi[pi.TEAM_ID != 0]
 			pi = pi[~pi.PERSON_ID.isin(curdb)]
 			plyers.extend(pi.PERSON_ID.values)
 		plyers = list(set(plyers))
 		print('Need to get {} new players'.format(len(plyers)))
 		for ct,pid in enumerate(tqdm(plyers)):
-			pin = self.tracking_info(pid)
+			pin = self.get_player_info(pid)
 			#award = self.get_awards(pid)
 			#ply = pin.merge(award,how='left',on='PERSON_ID')
 			final = pd.concat([final,pin])
@@ -618,6 +626,13 @@ class etl(base):
 			if col not in final.columns:
 				final[col] = None
 		self.insert_data(final.filter(sqlord),'players')
+		if start_date is not None:
+			end = self.conn.execute('select max(game_date) from teamLog where game_date < ?', (start_date,)).fetchone()[0]
+			new = [(str(t), seasons[-1], p, start_date) for t, p in roster[['TEAM_ID','PERSON_ID']].values]
+			with self.conn:
+				closed = self.conn.execute('update rosters set endDate = ? where endDate is null and seasonYear != ?', (end, seasons[-1])).rowcount
+				added = self.conn.executemany('insert or ignore into rosters (teamId, seasonYear, playerId, startDate, endDate) values (?, ?, ?, ?, NULL)', new).rowcount
+			print('Rosters: closed {} entries at {}, opened {} for {}'.format(closed, end, added, seasons[-1]))
 		return final
 
 	def get_first_buckets(self,game_dates):
