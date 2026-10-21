@@ -11,7 +11,7 @@ class base():
     def __init__(self):
         #self.db = 'data/database/nba.db'
         self.db = os.environ.get('NBA_DB_PATH', os.path.join(_BASE_DIR, 'data', 'database', 'nba.db'))
-        self.conn = sqlite3.connect(self.db)
+        self.conn = sqlite3.connect(self.db, check_same_thread=False)
         self.cur = self.conn.cursor()
         self.showTables = pd.read_sql("SELECT * FROM sqlite_master WHERE type in ('table','view');",self.conn)
         self.headers = {
@@ -36,8 +36,7 @@ class base():
            Inputs: Date as YYYY-MM-DD
            output: Season as YYYY-YY
         '''
-        if isinstance(date,str):
-            d = pd.to_datetime(date)
+        d = pd.to_datetime(date)
         if d.month <=9:
             return '{:%Y}-{:%y}'.format(pd.to_datetime(d)-  pd.to_timedelta(365,'days'),pd.to_datetime(d))
         else:

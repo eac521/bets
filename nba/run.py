@@ -75,7 +75,12 @@ def run_model(model_name,date=None):
 #I dont know that this is needed because we are going to use run model 
 # and then I dont want all the pieces connected here
 def run_pipeline(model_name, run_date=None):
-    data_pull(run_date)
+    try:
+        data_pull(run_date)
+    except Exception:
+        # late games often aren't posted by the morning run; predict on what loaded and let the 11:30 retry fill in
+        logger.exception('Data pull failed; refreshing tables and predicting on the data available')
+        data.refresh_materialized_tables()
     result = subprocess.run([sys.executable, '-m', 'pytest', 'tests/', '-m', 'not integration', '-q'], capture_output=True)
     if result.returncode != 0:
         logger.warning('Validation tests failed; continuing with predictions')
