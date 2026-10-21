@@ -16,7 +16,7 @@ from nba_api.stats.endpoints import (
 	LeagueDashTeamShotLocations, LeagueDashOppPtShot,
 	LeagueDashPlayerShotLocations, PlayerGameLogs, TeamInfoCommon,
 	leaguegamefinder, LeagueDashPtStats, PlayerIndex,
-	CommonPlayerInfo, PlayerAwards, GameRotation, LeagueDashPlayerPtShot, ScheduleLeagueV2
+	CommonPlayerInfo, PlayerAwards, GameRotation, LeagueDashPlayerPtShot, ScheduleLeagueV2, BoxScoreSummaryV3
 )
 from nba_api.live.nba.endpoints import BoxScore
 from .NBAbase import base
@@ -97,8 +97,8 @@ class etl(base):
 		#return final
 		
 	def update_teamLog(self,game_ids):
-		strD = ','.join(["'{}'".format(d) for d in game_ids])
 		df = self.get_summary(game_ids)
+		strD = ','.join(["'{}'".format(d) for d in df.game_id.unique()])
 		if (pd.read_sql("select count(*) as ct  from teamLog where game_id in ({})".format(strD),self.conn).sum()>0).all():
 			self.conn.execute("DELETE FROM teamLog where game_id in ({})".format(strD))
 			self.conn.commit()
@@ -461,70 +461,30 @@ class etl(base):
 
 			while retry_count < max_retries:
 				try:
-					bx = BoxScore(game_id=gameid)
-					aLine = {'q{}_pts'.format(d.get('period')) if d.get('period') < 5 else 'ot{}_pts'.format(
-						d.get('period') - 4): d.get('score') for d in bx.away_team_stats.data.get('periods')}
-					a = {'team_id': bx.away_team.data.get('teamId'),
-						 'game_id': bx.game_details.data.get('gameId'),
-						 'game_date': bx.game_details.data.get('gameTimeLocal')[:10],
-						 'home': 0,
-						 'attendance': 0,
-						 'win': 1 if bx.away_team.data.get('score') > bx.home_team.data.get('score') else 0,
-						 'opp_id': bx.home_team.data.get('teamId'),
-						 'inactive': [p.get('personId') for p in bx.away_team.data.get('players') if
-									  p.get('status') == 'INACTIVE'],
-						 'count_inactive': len([p.get('personId') for p in bx.away_team.data.get('players') if
-												p.get('status') == 'INACTIVE']),
-						 'bench_points': bx.away_team_stats.data.get('statistics').get('benchPoints'),
-						 'bp_allowed': bx.home_team_stats.data.get('statistics').get('benchPoints'),
-						 'points_off_turnovers': bx.away_team_stats.data.get('statistics').get('pointsFromTurnovers'),
-						 'to_points_allowed': bx.home_team_stats.data.get('statistics').get('pointsFromTurnovers'),
-						 'points_fast_break': bx.away_team_stats.data.get('statistics').get('pointsFastBreak'),
-						 'fb_points_allowed': bx.home_team_stats.data.get('statistics').get('pointsFastBreak'),
-						 'second_chance_points': bx.away_team_stats.data.get('statistics').get(
-							 'secondChancePointsMade'),
-						 'sc_points_allowed': bx.home_team_stats.data.get('statistics').get('secondChancePointsMade'),
-						 'biggest_lead': bx.away_team_stats.data.get('statistics').get('biggestLead'),
-						 'biggest_deficit': bx.home_team_stats.data.get('statistics').get('biggestLead'),
-						 'biggest_run': bx.away_team_stats.data.get('statistics').get('biggestScoringRun'),
-						 'biggest_run_allowed': bx.home_team_stats.data.get('statistics').get('biggestScoringRun'),
-						 'time_leading': bx.away_team_stats.data.get('statistics').get('timeLeading'),
-						 'times_tied': bx.away_team_stats.data.get('statistics').get('timesTied'),
-						 }
-					hLine = {'q{}_pts'.format(d.get('period')) if d.get('period') < 5 else 'ot{}_pts'.format(
-						d.get('period') - 4): d.get('score') for d in bx.home_team.data.get('periods')}
-					h = {'team_id': bx.home_team.data.get('teamId'),
-						 'game_id': bx.game_details.data.get('gameId'),
-						 'game_date': bx.game_details.data.get('gameTimeLocal')[:10],
-						 'home': 1,
-						 'attendance': bx.game_details.data.get('attendance'),
-						 'win': 1 if bx.home_team.data.get('score') > bx.away_team.data.get('score') else 0,
-						 'opp_id': bx.away_team.data.get('teamId'),
-						 'inactive': [p.get('personId') for p in bx.home_team.data.get('players') if
-									  p.get('status') == 'INACTIVE'],
-						 'count_inactive': len([p.get('personId') for p in bx.home_team.data.get('players') if
-												p.get('status') == 'INACTIVE']),
-						 'bench_points': bx.home_team.data.get('statistics').get('benchPoints'),
-						 'bp_allowed': bx.away_team_stats.data.get('statistics').get('benchPoints'),
-						 'points_off_turnovers': bx.home_team_stats.data.get('statistics').get('pointsFromTurnovers'),
-						 'to_points_allowed': bx.away_team_stats.data.get('statistics').get('pointsFromTurnovers'),
-						 'points_fast_break': bx.home_team_stats.data.get('statistics').get('pointsFastBreak'),
-						 'fb_points_allowed': bx.away_team_stats.data.get('statistics').get('pointsFastBreak'),
-						 'second_chance_points': bx.home_team_stats.data.get('statistics').get(
-							 'secondChancePointsMade'),
-						 'sc_points_allowed': bx.away_team_stats.data.get('statistics').get('secondChancePointsMade'),
-						 'biggest_lead': bx.home_team.data.get('statistics').get('biggestLead'),
-						 'biggest_deficit': bx.away_team.data.get('statistics').get('biggestLead'),
-						 'biggest_run': bx.home_team.data.get('statistics').get('biggestScoringRun'),
-						 'biggest_run_allowed': bx.away_team.data.get('statistics').get('biggestScoringRun'),
-						 'time_leading': bx.home_team.data.get('statistics').get('timeLeading'),
-						 'times_tied': bx.home_team.data.get('statistics').get('timesTied'),
-
-						 }
-					h.update(hLine)
-					a.update(aLine)
-					bxScore = pd.concat(
-						[pd.DataFrame.from_dict(h, orient='index').T, pd.DataFrame.from_dict(a, orient='index').T])
+					# stats.nba.com summary; the live BoxScore endpoint (cdn.nba.com) is blocked by Akamai from the mini
+					sm = BoxScoreSummaryV3(game_id=gameid)
+					gs = sm.game_summary.get_data_frame().iloc[0]
+					line = sm.line_score.get_data_frame().set_index('teamId')
+					oth = sm.other_stats.get_data_frame().set_index('teamId')
+					inact = sm.inactive_players.get_data_frame()
+					rows = []
+					for tid, oid, home in [(gs.homeTeamId, gs.awayTeamId, 1), (gs.awayTeamId, gs.homeTeamId, 0)]:
+						t, o = oth.loc[tid], oth.loc[oid]
+						ina = inact[inact.teamId == tid].personId.tolist()
+						row = {'team_id': tid, 'game_id': gameid, 'game_date': str(gs.gameEt)[:10], 'home': home,
+							'attendance': gs.attendance if home else 0,
+							'win': int(line.loc[tid, 'score'] > line.loc[oid, 'score']),
+							'opp_id': oid, 'inactive': ina, 'count_inactive': len(ina),
+							'bench_points': t.benchPoints, 'bp_allowed': o.benchPoints,
+							'points_off_turnovers': t.pointsFromTurnovers, 'to_points_allowed': o.pointsFromTurnovers,
+							'points_fast_break': t.pointsFastBreak, 'fb_points_allowed': o.pointsFastBreak,
+							'second_chance_points': t.pointsSecondChance, 'sc_points_allowed': o.pointsSecondChance,
+							'biggest_lead': t.biggestLead, 'biggest_deficit': o.biggestLead,
+							'biggest_run': t.biggestScoringRun, 'biggest_run_allowed': o.biggestScoringRun,
+							'times_tied': t.timesTied}
+						row.update({'q{}_pts'.format(q): line.loc[tid, 'period{}Score'.format(q)] for q in range(1, 5)})
+						rows.append(row)
+					bxScore = pd.DataFrame(rows)
 					adv = BoxScoreAdvancedV3(gameid).get_data_frames()[1].filter(
 						['gameId', 'teamId', 'assistPercentage', 'offensiveRating', 'defensiveRating', 'pace',
 						 'possessions', 'offensiveReboundPercentage', 'defensiveReboundPercentage']).rename(
@@ -533,7 +493,7 @@ class etl(base):
 								 'offensiveReboundPercentage': 'off_rb_pct',
 								 'defensiveReboundPercentage': 'def_rb_pct'})
 					final = bxScore.merge(adv, how='left', on=['game_id', 'team_id'])
-					final['season'] = self.derive_season(bx.game_details.data.get('gameTimeLocal')[:10])
+					final['season'] = self.derive_season(str(gs.gameEt)[:10])
 
 					# for col in pd.read_sql('select * from teamLog limit 1', self.conn).columns:
 					# 	if col not in final.columns:
@@ -543,6 +503,9 @@ class etl(base):
 					df = pd.concat([df,final])
 					break
 
+				except (KeyError, IndexError, ValueError) as e:
+					logger.warning('{}: summary not available yet, skipping - {}'.format(gameid, e))
+					break
 				except HTTPError as e:
 					if e.response.status_code == 429:  # Rate limit hit
 						retry_count += 1
