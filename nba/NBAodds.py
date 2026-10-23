@@ -44,9 +44,13 @@ API = 'https://api.the-odds-api.com/v4/historical/sports/basketball_nba'
 CONFIG_PATH = os.path.join(os.path.dirname(_BASE_DIR), 'betting', 'config.json')
 ODDS_DIR = os.path.join(_BASE_DIR, 'data', 'odds_hist')
 
-# Up to 10 bookmakers count as one region, so all of these cost the same as one
+# Up to 10 bookmakers count as one region; an 11th doubles the cost of every call.
+# Exchanges (us_ex): prices are contract prices before exchange fees (Kalshi taker fee = 0.07 * P * (1 - P) per contract).
+# Historical coverage starts when The Odds API added each book, so exchanges will be missing from older seasons.
 HIST_BOOKS = ['fanduel', 'draftkings', 'betmgm', 'espnbet', 'pinnacle',
-              'williamhill_us', 'betrivers', 'fanatics', 'hardrockbet']
+              'williamhill_us', 'fanatics',
+              'kalshi', 'polymarket_us', 'novig']
+assert len(HIST_BOOKS) <= 10, 'more than 10 bookmakers is billed as a second region'
 HIST_MARKETS = ['player_threes', 'player_threes_alternate',
                 'player_points', 'player_points_alternate',
                 'player_points_rebounds_assists', 'player_points_rebounds_assists_alternate']
