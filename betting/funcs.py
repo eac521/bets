@@ -2,14 +2,19 @@ import json
 import requests
 import re
 import os
+import glob
+import logging
 import pandas as pd
 import numpy as np
 import datetime as dt
+from zoneinfo import ZoneInfo
 from itertools import combinations
 
 
-from betting.constants import books
+from betting.constants import books, live_markets
 from collections import Counter, defaultdict
+logger = logging.getLogger(__name__)
+ET = ZoneInfo('America/New_York')
 '''
 Creating general betting functions that will be shared between NFL and NBA
 '''
@@ -21,13 +26,12 @@ class odds():
         self.paid = self.dct.get('oddsApi').get('paid')
         self.nbaEvents = 'https://api.the-odds-api.com/v4/sports/basketball_nba/events?apiKey={}&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'
         self.nflEvents = 'https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events?apiKey={}&dateFormat=iso&commenceTimeFrom={}&commenceTimeTo={}'
-        self.todayISO = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:00Z')
-        self.tomorISO = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(1)).strftime('%Y-%m-%dT%H:%M:00Z')
         self.budget = 1000
         self.kellyVal = .125
         self.parlayBudget = 750
         self.unit = self.budget * .01
         self.base_url = 'https://api.the-odds-api.com/v4/sports/{sport}/events/{{}}/odds?apiKey={{}}&regions=us&markets={markets}&dateFormat=iso&oddsFormat=american&bookmakers={books}'
+        self.liveDir = os.environ.get('ODDS_LIVE_DIR', os.path.join(os.path.dirname(__file__), '..', 'nba', 'data', 'odds_live'))
         self.market_vars = {
             'threes': {
                 'sport':'basketball_nba',
@@ -36,27 +40,181 @@ class odds():
             'points':{
                 'sport': 'basketball_nba',
                 'markets': 'player_points,player_points_alternate',
+                'eventURL':self.nbaEvents},
+            'pra':{
+                'sport': 'basketball_nba',
+                'markets': 'player_points_rebounds_assists,player_points_rebounds_assists_alternate',
                 'eventURL':self.nbaEvents}
         }
-    def oddsData(self, eventURL, usePaid=False, cost=1):
+
+    @staticmethod
+    def slate_window(now=None):
         '''
-        Gets today's game ids for the odds pulls. Uses the free key while it has enough requests left for the whole slate
-        (games x cost per game), otherwise, or if the free key errors, the paid key.
-        Inputs: events url, force the paid key, request cost per game (number of markets pulled)
-        Output: list of game ids, api key to use
+        Time window for today's slate: now until 6am ET tomorrow, so a 2pm pull doesn't pick up tomorrow's noon games.
+        Computed at call time (a long-running Streamlit process would otherwise keep the window from when it started).
+        Output: start and end as UTC ISO strings
         '''
-        free = requests.get(eventURL.format(self.freeApi, self.todayISO, self.tomorISO))
-        remaining = int(free.headers.get('x-requests-remaining', 0)) if free.ok else 0
+        now = now or dt.datetime.now(ET)
+        end = (now + dt.timedelta(1)).replace(hour=6, minute=0, second=0, microsecond=0)
+        fmt = '%Y-%m-%dT%H:%M:00Z'
+        return now.astimezone(dt.timezone.utc).strftime(fmt), end.astimezone(dt.timezone.utc).strftime(fmt)
+
+    def oddsData(self, eventURL, usePaid=False, cost=1, select=None):
+        '''
+        Gets today's events for the odds pulls (the events endpoint is free). Uses the free key while it has enough
+        requests left for the games being pulled (games x cost per game), otherwise, or if the free key errors, the paid key.
+        Inputs: events url, force the paid key, request cost per game (number of markets pulled),
+                optional function that filters the event list (e.g. games tipping in 15-25 minutes)
+        Output: list of event dicts, api key to use
+        '''
+        start, end = self.slate_window()
+        free = requests.get(eventURL.format(self.freeApi, start, end))
+        remaining = int(float(free.headers.get('x-requests-remaining', 0))) if free.ok else 0
         events = free.json() if free.ok else []
+        events = select(events) if select else events
         needed = len(events) * cost
         if usePaid or not free.ok or remaining < needed:
-            print('Using paid key: free has {} requests left, slate needs {} (status {})'.format(remaining, needed, free.status_code))
-            r = requests.get(eventURL.format(self.paid, self.todayISO, self.tomorISO))
+            logger.info('Using paid key: free has {} requests left, pull needs {} (status {})'.format(remaining, needed, free.status_code))
+            r = requests.get(eventURL.format(self.paid, start, end))
             r.raise_for_status()
-            return [d['id'] for d in r.json()], self.paid
-        print('Using free key: {} requests left, slate needs {}'.format(remaining, needed))
-        return [d['id'] for d in events], self.freeApi
+            events = select(r.json()) if select else r.json()
+            return events, self.paid
+        logger.info('Using free key: {} requests left, pull needs {}'.format(remaining, needed))
+        return events, self.freeApi
 
+    @staticmethod
+    def parse_event(game, pull_sequence, snapshot_ts):
+        '''
+        Flattens one event-odds response into long rows: one row per book x market x player x side x line.
+        Same schema as the historical backfill (nba/NBAodds.py) plus event_id, so live and historical stack together.
+        Inputs: event odds json, pull label (open/midday/close/manual), snapshot time (tz-aware ET)
+        Output: DataFrame
+        '''
+        commence = pd.Timestamp(game.get('commence_time')).tz_convert(ET)
+        rows = []
+        for bk in game.get('bookmakers', []):
+            for mrkt in bk.get('markets', []):
+                last_update = pd.Timestamp(mrkt.get('last_update')).tz_convert(ET) if mrkt.get('last_update') else pd.NaT
+                for o in mrkt.get('outcomes', []):
+                    rows.append({'event_id': game.get('id'), 'game_date': commence.strftime('%Y-%m-%d'),
+                                 'commence_time_et': commence.tz_localize(None),
+                                 'home_team': game.get('home_team'), 'away_team': game.get('away_team'),
+                                 'pull_sequence': pull_sequence, 'snapshot_ts': snapshot_ts.tz_localize(None),
+                                 'book': bk.get('key'), 'market': mrkt.get('key'),
+                                 'player_name': o.get('description'), 'side': o.get('name'),
+                                 'line': o.get('point'), 'price': o.get('price'),
+                                 'last_update': last_update.tz_localize(None) if pd.notna(last_update) else pd.NaT})
+        df = pd.DataFrame(rows)
+        if not df.empty:
+            df['price'] = df['price'].round().astype('Int64')
+            df['is_stale'] = (df.snapshot_ts - df.last_update) > pd.Timedelta(minutes=60)
+        return df
+
+    def pull_snapshot(self, pull_sequence, select=None):
+        '''
+        Pulls all live markets for today's games (or the games picked by select) and appends them as one parquet file:
+        {liveDir}/{season}/{pull_sequence}/{date}_{HHMMSS}.parquet. Files are never overwritten.
+        Inputs: pull label (open/midday/close/manual), optional event filter
+        Output: DataFrame of the rows written (empty if nothing was posted)
+        '''
+        url = self.build_odds_url(markets=live_markets)
+        events, akey = self.oddsData(self.nbaEvents, cost=len(live_markets), select=select)
+        if not events:
+            return pd.DataFrame()
+        snapshot_ts = pd.Timestamp.now(tz=ET).floor('s')
+        l, used = [], 0
+        for event in events:
+            r = requests.get(url.format(event.get('id'), akey))
+            if not r.ok:
+                logger.error('{} pull failed for event {} ({}): {}'.format(pull_sequence, event.get('id'), r.status_code, r.text[:300]))
+                continue
+            used += int(float(r.headers.get('x-requests-last', 0)))
+            l.append(self.parse_event(r.json(), pull_sequence, snapshot_ts))
+        df = pd.concat(l, ignore_index=True) if l else pd.DataFrame()
+        if df.empty:
+            logger.info('{} pull: no props posted for {} events'.format(pull_sequence, len(events)))
+            return df
+        date = snapshot_ts.strftime('%Y-%m-%d')
+        folder = os.path.join(self.liveDir, self.season_of(date), pull_sequence)
+        os.makedirs(folder, exist_ok=True)
+        df.to_parquet(os.path.join(folder, '{}_{}.parquet'.format(date, snapshot_ts.strftime('%H%M%S'))), index=False)
+        logger.info('{} pull: {} games, {:,} rows, {} credits'.format(pull_sequence, df.event_id.nunique(), len(df), used))
+        return df
+
+    @staticmethod
+    def season_of(date):
+        d = pd.to_datetime(date)
+        start = d.year if d.month > 9 else d.year - 1
+        return '{}-{}'.format(start, str(start + 1)[2:])
+
+    def read_snapshots(self, date=None, pull_sequence='*'):
+        '''Reads every snapshot file for one date (all pulls unless pull_sequence is given).'''
+        date = date or dt.datetime.now(ET).strftime('%Y-%m-%d')
+        files = glob.glob(os.path.join(self.liveDir, self.season_of(date), pull_sequence, '{}_*.parquet'.format(date)))
+        return pd.concat([pd.read_parquet(f) for f in files], ignore_index=True) if files else pd.DataFrame()
+
+    @staticmethod
+    def best_prices(snap, markets):
+        '''
+        Current price table from the snapshot rows. For each game, only its most recent snapshot counts (a line the book
+        has since pulled drops out). The main and alternate markets often list the same line at different prices:
+        keep the better payout (higher American odds), since that's the one you'd take. Never average prices.
+        Inputs: long snapshot rows, list of market keys for the model
+        Output: wide table name, number, over_under, one column per book, plus as_of (snapshot time)
+        '''
+        df = snap[snap.market.isin(markets)].copy()
+        if df.empty:
+            return pd.DataFrame(columns=['name', 'number', 'over_under'])
+        df = df[df.snapshot_ts == df.groupby('event_id').snapshot_ts.transform('max')]
+        df['book'] = df.book.map({k: v['odds_col'] for k, v in books.items()})
+        best = df.groupby(['player_name', 'line', 'side', 'book']).agg(price=('price', 'max'), as_of=('snapshot_ts', 'max')).reset_index()
+        odf = best.pivot(index=['player_name', 'line', 'side'], columns='book', values='price').reset_index()
+        odf.columns.name = None
+        odf = odf.merge(best.groupby(['player_name', 'line', 'side']).as_of.max().reset_index(), on=['player_name', 'line', 'side'])
+        return odf.rename(columns={'player_name': 'name', 'line': 'number', 'side': 'over_under'})
+
+    def latest_odds(self, market, date=None):
+        '''Current prices for a model's markets from today's snapshots (no API call).'''
+        return self.best_prices(self.read_snapshots(date), self.market_vars[market]['markets'].split(','))
+
+    @staticmethod
+    def settle_bets(conn, user, since):
+        '''
+        Settles threes bets from the box scores: over wins if threes made > line, under if < line.
+        void = box scores loaded for that date but the player didn't log minutes (DNP); pending = box scores not loaded yet.
+        Inputs: sqlite connection, user, first date to include (YYYY-MM-DD)
+        Output: DataFrame of bets with status and profit
+        '''
+        df = pd.read_sql('''
+            SELECT b.date, b.player_id, b.over_under, b.number, b.bet_book, b.final_line, b.bet_amount,
+                   pl.min, COALESCE(pl.lc_fgm,0) + COALESCE(pl.rc_fgm,0) + COALESCE(pl.abv_fgm,0) AS made,
+                   ld.d AS loaded
+            FROM bets b
+            LEFT JOIN plyrLogs pl ON CAST(pl.player_id AS INTEGER) = CAST(b.player_id AS INTEGER) AND date(pl.game_date) = b.date
+            LEFT JOIN (SELECT DISTINCT date(game_date) AS d FROM plyrLogs WHERE date(game_date) >= ?) ld ON ld.d = b.date
+            WHERE b.user = ? AND b.market = 'threes' AND b.date >= ? AND b.bet_amount IS NOT NULL
+        ''', conn, params=[since, user, since])
+        played = df['min'].fillna(0) > 0
+        won = np.where(df.over_under == 'Over', df.made > df.number, df.made < df.number)
+        df['status'] = np.select([df.loaded.isna(), ~played, won], ['pending', 'void', 'win'], 'loss')
+        price = df.final_line.astype(float)
+        mult = np.where(price > 0, price / 100, 100 / price.abs())
+        df['profit'] = np.select([df.status == 'win', df.status == 'loss'], [df.bet_amount * mult, -df.bet_amount], 0.0)
+        return df
+
+    def current_bankroll(self, conn, user, start=1000, keep=.8, since='2026-10-01'):
+        '''
+        Daily Kelly bankroll: starting bankroll + settled P&L, minus 20% of each new profit high set aside.
+        Losses count in full; set-aside money never comes back (a high-water skim, like withdrawing it).
+        Inputs: sqlite connection, user, starting bankroll, share of profits kept in the bankroll, season start date
+        Output: dict with bankroll, pnl, set_aside, pending (count of unsettled bets)
+        '''
+        df = self.settle_bets(conn, user, since)
+        cum = df[df.status.isin(['win', 'loss'])].groupby('date').profit.sum().sort_index().cumsum()
+        pnl = cum.iloc[-1] if len(cum) else 0.0
+        set_aside = (1 - keep) * max(cum.max(), 0) if len(cum) else 0.0
+        return {'bankroll': round(start + pnl - set_aside, 2), 'pnl': round(pnl, 2),
+                'set_aside': round(set_aside, 2), 'pending': int((df.status == 'pending').sum())}
 
     def kellyCrit(self,prob,odds,show=True):
         '''
@@ -97,29 +255,8 @@ class odds():
         final = final[final['number']>0]
         return final
 
-    def fetch_odds(self,market):
-        url = self.build_odds_url(market)
-        eventURL = self.market_vars.get(market).get('eventURL')
-        df = pd.DataFrame()
-        events, akey = self.oddsData(eventURL, cost=len(self.market_vars.get(market).get('markets').split(',')))
-        l = []
-        for event in events:
-            r = requests.get(url.format(event, akey))
-            game = r.json()
-            for key in game.get('bookmakers'):
-                bk = key.get('title')
-                for mrkt in key.get('markets'):
-                    temp = pd.DataFrame(mrkt.get('outcomes'))
-                    temp.columns = ['over_under', 'name', 'price', 'number']
-                    temp['book'] = bk
-                    l.append(temp)
-        df = pd.concat(l)
-        odf = df.pivot_table(index=['name', 'number', 'over_under'], columns=['book']).reset_index()
-        odf.columns = [(c[1] if c[1] != '' else c[0]).replace(' ', '_') for c in odf.columns]  
-        return odf
-
     def bet_table(self, lines, odf, sportsbooks=None):
-        bks = sportsbooks or ['draftkings', 'fanduel', 'espnbet']
+        bks = sportsbooks or [k for k, v in books.items() if v['role'] != 'info']
 
         active = {k: v for k, v in books.items() if k in bks}
         final = lines.merge(odf, how='left', on=['name', 'number', 'over_under'])
@@ -127,6 +264,8 @@ class odds():
         for book, meta in active.items():
             odds_col = meta['odds_col']
             prefix = meta['col_prefix']
+            if odds_col not in final.columns:
+                final[odds_col] = np.nan
             kelly = [self.kellyCrit(p, odd, False) for p, odd in zip(final.model_prob, final[odds_col])]
             final['{}EV'.format(prefix)] = [self.ev(p, odd) for p, odd in
                                             zip(final.model_prob, final[odds_col].replace(0, 1))]
@@ -152,11 +291,12 @@ class odds():
         grouped['fair_under_odds_{}'.format(book)] = grouped['under_odds_pct'] / (grouped['over_odds_pct'] + grouped['under_odds_pct'])
         return grouped[['name',numCol,'fair_over_odds_{}'.format(book),'fair_under_odds_{}'.format(book),'{}Vig'.format(book)]]
 
-    def build_odds_url(self, market, sportsbooks=None):
+    def build_odds_url(self, market=None, sportsbooks=None, markets=None):
         bks = list(books.keys()) if sportsbooks is None else sportsbooks
+        mkts = ','.join(markets) if markets else self.market_vars[market]['markets']
         return self.base_url.format(
-            sport=self.market_vars[market]['sport'],
-            markets=self.market_vars[market]['markets'],
+            sport='basketball_nba' if markets else self.market_vars[market]['sport'],
+            markets=mkts,
             books='%2c'.join(bks)
         )
 

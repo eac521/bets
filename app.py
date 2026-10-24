@@ -21,6 +21,7 @@ from nba.run import data_pull
 etl = NBAetl.etl()
 data = NBAdata.data()
 from betting import funcs
+from betting.constants import books as BOOK_META
 od = funcs.odds()
 
 
@@ -29,7 +30,13 @@ logger = logging.getLogger(__name__)
 
 # ── Config ──
 USERS = ['EAC', 'larBear']
-BOOKS = ['FanDuel', 'DraftKings', 'theScore_Bet']
+PRIMARY = ['FanDuel', 'DraftKings']  # best book is always one of these
+SECONDARY = ['BetMGM', 'Fanatics', 'theScore_Bet']  # limited: shown when they beat the best primary price
+BOOKS = PRIMARY + SECONDARY
+PREFIX = {v['odds_col']: v['col_prefix'] for v in BOOK_META.values()}
+START_BANKROLL = 1000
+KEEP_SHARE = .8  # share of profits that goes back into the bankroll
+SEASON_START = '2026-10-01'
 MODEL_NAME = 'threes'
 
 
@@ -44,12 +51,20 @@ if test_mode:
 run_date = str(test_date) if test_mode else dt.datetime.today().strftime('%Y-%m-%d')
 st.sidebar.title('Settings')
 active_user = st.sidebar.selectbox('User', USERS)
+@st.cache_data(ttl=300)
+def load_bankroll(user):
+    return od.current_bankroll(etl.conn, user, start=START_BANKROLL, keep=KEEP_SHARE, since=SEASON_START)
+
+br = load_bankroll(active_user)
 bankroll = st.sidebar.number_input(
     'Current Bankroll ($)',
-    value = 1000.0,
+    value = float(br['bankroll']),
     format='%.2f'
 )
+st.sidebar.caption('Start ${:,.0f} · settled P&L ${:,.2f} · set aside ${:,.2f} · {} bets pending'.format(
+    START_BANKROLL, br['pnl'], br['set_aside'], br['pending']))
 od.budget = bankroll
+
 
 # ── Override refresh for when data still hasnt loaded ──
 if st.sidebar.button('Refresh Data (Override)'):
@@ -87,7 +102,9 @@ def create_todays_bets(MODEL_NAME,date=None,value=0,test=False,bankroll=1000):
         LEFT JOIN players USING (player_id)
         WHERE date = '{}' '''.format(date), etl.conn)
     else:
-        odf = od.fetch_odds(MODEL_NAME)
+        odf = od.latest_odds(MODEL_NAME, date)
+        if odf.empty:
+            return pd.DataFrame()
     df = od.bet_table(preds, odf)
     if not test:
         etl.insert_data(df.assign(date=date, market=MODEL_NAME), 'lines', sort=True)
@@ -111,6 +128,13 @@ def load_current_plays(user, date):
 
 
 
+# ── Line refresh: one manual snapshot of every game, then the table reads from it ──
+if not test_mode and st.sidebar.button('Refresh Lines'):
+    with st.spinner('Pulling lines...'):
+        snap = od.pull_snapshot('manual')
+    create_todays_bets.clear()
+    st.sidebar.success('Pulled {} games'.format(snap.event_id.nunique() if not snap.empty else 0))
+
 # ── Display predictions and bet recording form ──
 if test_mode:
     plays = create_todays_bets(MODEL_NAME,date=str(test_date), test=True,bankroll=bankroll)
@@ -127,8 +151,10 @@ games = pd.read_sql("""
     GROUP BY t.game_id
 """, etl.conn, params=[run_date])
 edited = None
+if not plays.empty and 'as_of' in plays.columns and plays.as_of.notna().any():
+    st.caption('Prices as of {:%I:%M %p} (oldest game: {:%I:%M %p})'.format(plays.as_of.max(), plays.as_of.min()))
 if plays.empty:
-    st.info('No predictions available for today. Data may not have been refreshed yet.')
+    st.info('No predictions or no lines for today yet. Data may not have been refreshed, or use Refresh Lines.')
 else:
     # Filter out bets already placed by this user
     open_bets = load_current_plays(active_user, run_date)
@@ -158,8 +184,13 @@ else:
             filtered = filtered[filtered['team'].isin(game_filter.split(' @ '))]
         with col_f2:
             team_filter = st.selectbox('Team', ['All'] + sorted(predictions['team'].unique().tolist()))
-        filtered['best_book'] = filtered[[b for b in BOOKS if b in predictions.columns]].idxmax(axis=1)
-        best_book_filter = st.selectbox('Best Book', ['All'] + BOOKS)
+        prim = [b for b in PRIMARY if b in filtered.columns]
+        sec = [b for b in SECONDARY if b in filtered.columns]
+        best_price = filtered[prim].max(axis=1)
+        filtered['best_book'] = filtered[prim].fillna(-100000).idxmax(axis=1).where(best_price.notna())
+        beats = filtered[sec].gt(best_price.fillna(-100000), axis=0)
+        filtered['beats'] = [', '.join(b for b, v in zip(sec, row) if v) for row in beats.values]
+        best_book_filter = st.selectbox('Best Book', ['All'] + PRIMARY)
         odds_range = st.slider('Odds Range', min_value=-1000, max_value=1000, value=(-200, 200), step=50)
         if best_book_filter != 'All':
             filtered = filtered[filtered['best_book'] == best_book_filter]
@@ -176,9 +207,11 @@ else:
         # Add columns for bet recording
 
         filtered.insert(0, 'bet', False)
-        filtered['book'] = 'None'
-        amt_cols = [col for col in filtered.columns if col.endswith('Amount')]
-        filtered['wager'] =  (filtered[amt_cols].max(axis=1) / 0.25).round() * 0.25
+        filtered['book'] = filtered['best_book'].fillna('None')
+        best_amt = pd.Series(float('nan'), index=filtered.index)
+        for b in prim:
+            best_amt = best_amt.mask(filtered['best_book'] == b, filtered['{}Amount'.format(PREFIX[b])])
+        filtered['wager'] =  (best_amt.clip(lower=0) / 0.25).round() * 0.25
 
         # Display with inline editing
         ev_config = {col: st.column_config.NumberColumn(col, format='percent') for col in filtered.columns if col.endswith('EV')}
@@ -187,7 +220,7 @@ else:
             filtered,
             column_config={
                 'bet': st.column_config.CheckboxColumn('Bet?'),
-                'book': st.column_config.SelectboxColumn('Book', options=BOOKS),
+                'book': st.column_config.SelectboxColumn('Book', options=BOOKS + ['None']),
                 'wager': st.column_config.NumberColumn('Wager ($)', min_value=0.0, step=.25, format='$%.2f'),
                 'player_id': None,  # hides the column
                 **ev_config,
