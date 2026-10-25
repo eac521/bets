@@ -89,7 +89,7 @@ def et_to_utc_iso(ts_et):
     '''Naive ET Timestamp -> UTC ISO string for the API'''
     t = pd.Timestamp(ts_et)
     if t.tzinfo is None:
-        t = t.tz_localize(ET)
+        t = t.tz_localize(ET, ambiguous=True, nonexistent='shift_forward')
     return t.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ')
 
 

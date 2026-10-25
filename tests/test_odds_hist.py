@@ -75,3 +75,9 @@ def test_normalize_name():
     assert normalize_name('Nikola Jokić') == 'nikola jokic'
     assert normalize_name('Derrick Jones Jr.') == 'derrick jones'
     assert normalize_name("De'Aaron Fox") == 'deaaron fox'
+
+
+def test_et_to_utc_dst_transitions():
+    '''Open-search midpoints can land in the repeated (fall back) or skipped (spring forward) hour'''
+    assert et_to_utc_iso(pd.Timestamp('2025-11-02 01:36:43')) == '2025-11-02T05:36:43Z'
+    assert et_to_utc_iso(pd.Timestamp('2026-03-08 02:01:42')) == '2026-03-08T07:00:00Z'
