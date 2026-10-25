@@ -1,6 +1,6 @@
 # Changelog
 ## Unreleased
-- Historical odds backfill (`nba/NBAodds.py`; books include the Kalshi, Polymarket US and Novig exchanges): The Odds API historical events and event-odds endpoints into parquet by season / pull_sequence, with an events manifest, resumable task table, credit floor and per-run cap, open-line search, Pikkit bet-time snapshots, player/team alias tables, pilot report and live-lines comparison
+- Historical odds backfill (`nba/NBAodds.py`; books include the Kalshi and Novig exchanges and BetRivers): The Odds API historical events and event-odds endpoints into parquet by season / pull_sequence, with an events manifest, resumable task table, credit floor and per-run cap, open-line search, Pikkit bet-time snapshots, player/team alias tables, pilot report and live-lines comparison
 - Tests for the backfill helpers (`tests/test_odds_hist.py`)
 - Fixed the Fanatics bookmaker key (`fanatcis` -> `fanatics`) so live pulls return Fanatics prices
 - `NAME_MAP`: Kenyon Martin Jr, Moe Wagner, Vincent Williams Jr

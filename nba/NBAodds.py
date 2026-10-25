@@ -49,7 +49,7 @@ ODDS_DIR = os.path.join(_BASE_DIR, 'data', 'odds_hist')
 # Historical coverage starts when The Odds API added each book, so exchanges will be missing from older seasons.
 HIST_BOOKS = ['fanduel', 'draftkings', 'betmgm', 'espnbet', 'pinnacle',
               'williamhill_us', 'fanatics',
-              'kalshi', 'polymarket_us', 'novig']
+              'kalshi', 'novig', 'betrivers']
 assert len(HIST_BOOKS) <= 10, 'more than 10 bookmakers is billed as a second region'
 HIST_MARKETS = ['player_threes', 'player_threes_alternate',
                 'player_points', 'player_points_alternate',
