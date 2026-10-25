@@ -55,6 +55,10 @@ HIST_MARKETS = ['player_threes', 'player_threes_alternate',
                 'player_points', 'player_points_alternate',
                 'player_points_rebounds_assists', 'player_points_rebounds_assists_alternate']
 OPEN_PROBE_MARKET = 'player_threes'
+# --extra: markets pulled into their own store, reusing the core run's events and open times.
+# No player_threes_q1 exists in The Odds API's market list.
+EXTRA_MARKETS = ['player_first_basket', 'player_first_team_basket', 'player_method_of_first_basket', 'player_points_q1']
+EXTRA_DIR = os.path.join(_BASE_DIR, 'data', 'odds_hist_extra')
 PROP_PATTERN = r'Three|3-Point|three-point|Points|Rebounds|Assists|Pts'
 
 CORE_PULLS = ['open', 'morning', 'midday', 'close']
@@ -182,17 +186,22 @@ def season_window(season):
 
 class oddsHistory(base):
 
-    def __init__(self, api_key=None, odds_dir=ODDS_DIR, min_remaining=25000, sleep=0.25):
+    def __init__(self, api_key=None, odds_dir=ODDS_DIR, min_remaining=25000, sleep=0.25, markets=HIST_MARKETS, seed_from=None):
         '''
         api_key: The Odds API key with historical access. Falls back to env ODDS_HIST_KEY,
                  then oddsApi.historical in betting/config.json
         min_remaining: stop the run when x-requests-remaining drops below this
+        markets: markets requested in every snapshot
+        seed_from: path to another odds_hist.db; its events, aliases and found open times are reused,
+                   so no events calls and no open search are paid for again
         '''
         super().__init__()
         self.api_key = api_key or os.environ.get('ODDS_HIST_KEY') or self._config_key()
         self.odds_dir = odds_dir
         self.min_remaining = min_remaining
         self.sleep = sleep
+        self.markets = list(markets)
+        self.seed_from = seed_from
         self.remaining = None
         self.credits_run = 0
         self.max_credits = None
@@ -262,8 +271,9 @@ class oddsHistory(base):
             r.raise_for_status()
         raise RuntimeError('API request failed after retries: {} {}'.format(url, params.get('date')))
 
-    def fetch_snapshot(self, event_id, when_et, pull_sequence, markets=HIST_MARKETS):
-        '''One event at one snapshot time -> (rows, raw json)'''
+    def fetch_snapshot(self, event_id, when_et, pull_sequence, markets=None):
+        '''One event at one snapshot time -> (rows, raw json). markets defaults to self.markets'''
+        markets = markets or self.markets
         js = self._get('{}/events/{}/odds'.format(API, event_id), {
             'bookmakers': ','.join(HIST_BOOKS), 'markets': ','.join(markets),
             'oddsFormat': 'american', 'dateFormat': 'iso', 'date': et_to_utc_iso(when_et)})
@@ -406,6 +416,45 @@ class oddsHistory(base):
             df = df[df.pull_sequence.isin(pulls)]
         return df.sort_values(['game_date', 'pull_sequence', 'commence_time_et'])
 
+    def seed(self):
+        '''Copy events, aliases and done open snapshot times from self.seed_from (safe to re-run)'''
+        self.hconn.execute('attach database ? as src', (self.seed_from,))
+        for tbl in ['events', 'event_dates', 'team_alias', 'player_alias']:
+            self.hconn.execute('insert or ignore into {0} select * from src.{0}'.format(tbl))
+        self.hconn.execute('''insert or ignore into tasks (event_id, pull_sequence, target_ts)
+                              select event_id, 'open', snapshot_ts from src.tasks
+                              where pull_sequence = 'open' and status = 'done' and snapshot_ts is not null''')
+        self.hconn.commit()
+        self.hconn.execute('detach database src')
+
+    def validate_markets(self, season):
+        '''
+        One request per market on the season's last event at its close. A 422 means the API rejects the key,
+        which would empty every combined request, so that market is dropped. Costs at most 10 credits per market.
+        '''
+        ev = self.events(season)
+        if ev.empty:
+            return self.markets
+        e = ev.iloc[-1]
+        when = pd.Timestamp(e.commence_time_et) - CLOSE_OFFSET
+        keep = []
+        for m in self.markets:
+            try:
+                self._get('{}/events/{}/odds'.format(API, e.event_id), {
+                    'bookmakers': ','.join(HIST_BOOKS), 'markets': m, 'oddsFormat': 'american',
+                    'dateFormat': 'iso', 'date': et_to_utc_iso(when)}, allow_empty=(404,))
+                keep.append(m)
+            except requests.HTTPError as err:
+                if err.response is not None and err.response.status_code == 422:
+                    logger.warning('Market {} rejected by the API (422); dropped'.format(m))
+                else:
+                    raise
+        if not keep:
+            raise BudgetStop('every requested market was rejected by the API')
+        self.markets = keep
+        logger.info('{}: markets {}'.format(season, keep))
+        return keep
+
     def run(self, season, pulls=CORE_PULLS, hourly=False, bets=True, max_credits=None, end=None):
         '''
         Full backfill for a season: manifest -> tasks -> pulls. Resumable: only pending tasks run,
@@ -414,8 +463,13 @@ class oddsHistory(base):
         self.max_credits = max_credits
         self.credits_run = 0
         try:
-            self.build_events(season, end)
-            self.plan_tasks(season, pulls, hourly)
+            if self.seed_from:
+                self.seed()
+                self.plan_tasks(season, [p for p in pulls if p != 'open'], hourly)
+            else:
+                self.build_events(season, end)
+                self.plan_tasks(season, pulls, hourly)
+            self.validate_markets(season)
             if bets:
                 logger.info('{} bet-time tasks planned'.format(self.plan_bet_tasks(season)))
             todo = self.pending(season, list(pulls) + (['hourly'] if hourly else []) + (['bet'] if bets else []))
@@ -436,7 +490,7 @@ class oddsHistory(base):
         for t in grp.itertuples():
             before = self.credits_run
             try:
-                if pull == 'open':
+                if pull == 'open' and t.target_ts == 'search':
                     snap = self.find_open(t.event_id, t.commence_time_et)
                     df = self.fetch_snapshot(t.event_id, snap, 'open')[0] if snap is not None else pd.DataFrame(columns=ODDS_COLUMNS)
                 else:
@@ -604,12 +658,22 @@ if __name__ == '__main__':
     ap.add_argument('--end', default=None, help='last game_date to include (YYYY-MM-DD)')
     ap.add_argument('--alias', action='store_true', help='build player_alias and print the match report')
     ap.add_argument('--report', action='store_true', help='pilot report')
+    ap.add_argument('--extra', action='store_true',
+                    help='pull EXTRA_MARKETS into odds_hist_extra, reusing the core run (implies --no-bets)')
+    ap.add_argument('--markets', default=None, help='comma list of markets (overrides the default set)')
     args = ap.parse_args()
 
     os.makedirs('logs', exist_ok=True)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                         handlers=[logging.FileHandler('logs/odds_backfill.log'), logging.StreamHandler()])
-    oh = oddsHistory(min_remaining=args.min_remaining)
+    if args.extra:
+        args.no_bets = True
+        oh = oddsHistory(min_remaining=args.min_remaining, odds_dir=EXTRA_DIR,
+                         markets=args.markets.split(',') if args.markets else EXTRA_MARKETS,
+                         seed_from=os.path.join(ODDS_DIR, 'odds_hist.db'))
+    else:
+        oh = oddsHistory(min_remaining=args.min_remaining,
+                         markets=args.markets.split(',') if args.markets else HIST_MARKETS)
     pulls = [p for p in args.pulls.split(',') if p]
     if args.estimate:
         print(oh.estimate(args.season, pulls, args.hourly, end=args.end))
