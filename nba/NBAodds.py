@@ -57,7 +57,7 @@ HIST_MARKETS = ['player_threes', 'player_threes_alternate',
 OPEN_PROBE_MARKET = 'player_threes'
 # --extra: markets pulled into their own store, reusing the core run's events and open times.
 # No player_threes_q1 exists in The Odds API's market list.
-EXTRA_MARKETS = ['player_first_basket', 'player_first_team_basket', 'player_method_of_first_basket', 'player_points_q1']
+EXTRA_MARKETS = ['player_first_basket', 'player_first_team_basket', 'player_points_q1']
 EXTRA_DIR = os.path.join(_BASE_DIR, 'data', 'odds_hist_extra')
 PROP_PATTERN = r'Three|3-Point|three-point|Points|Rebounds|Assists|Pts'
 
