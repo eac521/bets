@@ -96,6 +96,31 @@ class etl(base):
 		self.insert_data(final, table)
 		#return final
 		
+	def update_period_log(self, seasons, qtr=1):
+		'''Fills plyrQ{qtr}Logs with one quarter's player box scores from PlayerGameLogs (period_nullable=qtr).
+		One call per season returns every player-game, so a season takes seconds, not a per-game crawl.
+		Regular season only. Skips player-games already in the table, so it can be re-run at any time.
+		Only the base box score columns are filled; the tracking, rebound, advanced and first-basket columns stay null.
+		Inputs: list of seasons formatted YYYY-YY, quarter number
+		'''
+		table = 'plyrQ{}Logs'.format(qtr)
+		cols = [c[1] for c in self.conn.execute('pragma table_info({})'.format(table))]
+		have = pd.read_sql('select player_id, game_id from {}'.format(table), self.conn)
+		logCols = ['PLAYER_ID', 'TEAM_ID', 'GAME_ID', 'GAME_DATE', 'MIN', 'FTM', 'FTA', 'REB', 'AST', 'TOV',
+			'STL', 'BLK', 'BLKA', 'PF', 'PFD', 'PTS', 'PLUS_MINUS', 'DD2', 'TD3']
+		for season in seasons:
+			log = PlayerGameLogs(season_nullable=season, period_nullable=qtr, season_type_nullable='Regular Season',
+				league_id_nullable='00', timeout=60).get_data_frames()[0][logCols]
+			log.columns = [c.lower() for c in logCols]
+			log = log.astype({'player_id': str, 'team_id': str, 'game_id': str})
+			log['game_date'] = log.game_date.str[:10]
+			log = log[log.game_id.str.startswith('002')]
+			new = log.merge(have, how='left', on=['player_id', 'game_id'], indicator=True)
+			new = new[new._merge == 'left_only'].drop(columns='_merge').reindex(columns=cols)
+			self.insert_data(new, table)
+			logger.info('{} {}: {:,} new player-games over {:,} games'.format(table, season, len(new), new.game_id.nunique()))
+			time.sleep(np.random.randint(5, 15))
+
 	def update_teamLog(self,game_ids):
 		df = self.get_summary(game_ids)
 		strD = ','.join(["'{}'".format(d) for d in df.game_id.unique()])

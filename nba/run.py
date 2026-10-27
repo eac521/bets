@@ -18,7 +18,7 @@ import numpy as np
 from nba import NBAbase, NBAetl, NBAdata, NBAmodels
 etl = NBAetl.etl()
 data = NBAdata.data()
-from betting import funcs
+from betting import funcs, odds_live
 od = funcs.odds()
 
 pipes = {'threes':data.threes_pipe}
@@ -85,6 +85,12 @@ def run_pipeline(model_name, run_date=None):
     if result.returncode != 0:
         logger.warning('Validation tests failed; continuing with predictions')
     lines = run_model(model_name, run_date)
+    if run_date is None:
+        # opening odds snapshot after the morning run; the 11:30 run skips it once today's open exists
+        try:
+            odds_live.pull_open(od)
+        except Exception:
+            logger.exception('Open odds pull failed')
 
 
 if __name__ == '__main__':
