@@ -10,6 +10,9 @@ NAME_MAP = {
     'KyShawn George': 'Kyshawn George',
     'Isaiah Stewart': 'Isaiah Stewart II',
     'Ronald Holland II': 'Ron Holland',
+    'Kenyon Martin Jr': 'KJ Martin',
+    'Moe Wagner': 'Moritz Wagner',
+    'Vincent Williams Jr': 'Vince Williams Jr',
 }
 derived_tables = {
     'team_def': {
