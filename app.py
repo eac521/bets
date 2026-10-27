@@ -37,7 +37,7 @@ st.set_page_config(page_title='NBA Betting Dashboard', layout='wide')
 
 
 # ── Sidebar ──
-test_mode = st.sidebar.checkbox('Test Mode',value=True)
+test_mode = st.sidebar.checkbox('Test Mode',value=False)
 test_date = None
 if test_mode:
     test_date = st.sidebar.date_input('Test Date', value=dt.date(2026, 3, 23))
@@ -90,7 +90,7 @@ def create_todays_bets(MODEL_NAME,date=None,value=0,test=False,bankroll=1000):
         odf = od.fetch_odds(MODEL_NAME)
     df = od.bet_table(preds, odf)
     if not test:
-        etl.insert_data(df, 'lines', sort=True)
+        etl.insert_data(df.assign(date=date, market=MODEL_NAME), 'lines', sort=True)
     amts = [col for col in df.columns if re.search('Amount$', col) != None]
     final = df[(df[amts]>value).any(axis=1)]
     return final

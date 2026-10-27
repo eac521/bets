@@ -66,6 +66,8 @@ class odds():
         '''
         if abs(prob) > .9999999:
             prob = self.convertOddsToPercent(prob)
+        if abs(odds) < 100:
+            return 0  # not a real American price (fetch_odds averaged a + and a - price): no bet
         b = odds / 100 if odds > 0 else 100 / abs(odds)
         kv = prob - (1-prob) / b
         wager = kv * self.budget * self.kellyVal
