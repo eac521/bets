@@ -35,7 +35,7 @@ def snap(od, g, seq, ts):
 
 def test_book_and_market_limits():
     assert len(books) == 10
-    assert len(live_markets) == 6
+    assert len(live_markets) == 9
 
 
 def test_slate_window_stops_before_tomorrows_games():

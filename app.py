@@ -30,8 +30,8 @@ logger = logging.getLogger(__name__)
 
 # ── Config ──
 USERS = ['EAC', 'larBear']
-PRIMARY = ['FanDuel', 'DraftKings']  # best book is always one of these
-SECONDARY = ['BetMGM', 'Fanatics', 'theScore_Bet']  # limited: shown when they beat the best primary price
+PRIMARY = ['FanDuel', 'DraftKings', 'BetMGM']  # best book is always one of these
+SECONDARY = ['Fanatics']  # limited: shown when it beats the best primary price
 BOOKS = PRIMARY + SECONDARY
 PREFIX = {v['odds_col']: v['col_prefix'] for v in BOOK_META.values()}
 START_BANKROLL = 1000
@@ -107,7 +107,7 @@ def create_todays_bets(MODEL_NAME,date=None,value=0,test=False,bankroll=1000):
             return pd.DataFrame()
     df = od.bet_table(preds, odf)
     if not test:
-        etl.insert_data(df.assign(date=date, market=MODEL_NAME), 'lines', sort=True)
+        etl.insert_data(df.assign(date=date, market=MODEL_NAME).reindex(columns=[c[1] for c in etl.conn.execute('pragma table_info(lines)')]), 'lines', sort=True)  # a book with no posted lines still gets its column
     amts = [col for col in df.columns if re.search('Amount$', col) != None]
     final = df[(df[amts]>value).any(axis=1)]
     return final

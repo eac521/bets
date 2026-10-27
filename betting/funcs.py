@@ -162,12 +162,12 @@ class odds():
         Inputs: long snapshot rows, list of market keys for the model
         Output: wide table name, number, over_under, one column per book, plus as_of (snapshot time)
         '''
-        df = snap[snap.market.isin(markets)].copy()
+        df = snap[snap.market.isin(markets)].copy() if not snap.empty else snap  # no snapshot yet today
         if df.empty:
             return pd.DataFrame(columns=['name', 'number', 'over_under'])
         df = df[df.snapshot_ts == df.groupby('event_id').snapshot_ts.transform('max')]
         df['book'] = df.book.map({k: v['odds_col'] for k, v in books.items()})
-        best = df.groupby(['player_name', 'line', 'side', 'book']).agg(price=('price', 'max'), as_of=('snapshot_ts', 'max')).reset_index()
+        best = df.groupby(['player_name', 'line', 'side', 'book']).agg(price=('price', 'max'), as_of=('snapshot_ts', 'max')).reset_index().astype({'price': float})  # NaN, not pd.NA, where a book has no price
         odf = best.pivot(index=['player_name', 'line', 'side'], columns='book', values='price').reset_index()
         odf.columns.name = None
         odf = odf.merge(best.groupby(['player_name', 'line', 'side']).as_of.max().reset_index(), on=['player_name', 'line', 'side'])
