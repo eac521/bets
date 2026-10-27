@@ -201,7 +201,7 @@ else:
         filtered = filtered[
             filtered[book_cols].apply(
                 lambda row: row.between(odds_range[0], odds_range[1]).any(), axis=1
-            )
+            ).astype(bool)  # an empty result must stay a row mask, not a column list
         ]
 
         # Add columns for bet recording
