@@ -59,12 +59,28 @@ class etl(base):
 
 	def update_player_log(self, game_dates, seasons=None, insert=True, qtr=0):
 		'''Pull in prior days game log information for each player.
-        Will pull in the log, first basket, rebounds and shooting stats for each player.
-        Inputs: list of game_dates, optionally can add the season to pull if many dates
-        Output: DataFrame with player logs, first buckets, rebounds, shooting locations and advanced stats, also will message plyrLogs updated.'''
+        Will pull in the log, first basket, rebounds and shooting stats for each player, replacing that date's rows.
+        Runs one date at a time (see build_player_log). seasons is no longer used.
+        Inputs: list of game_dates
+        Output: None, writes plyrLogs'''
 		table = 'plyrLogs' if qtr == 0 else 'plyrQ{}Logs'.format(qtr)
-		strD = ','.join(["'{}'".format(d) for d in game_dates])
-		log = self.get_logs(game_dates, seasons)
+		for game_date in sorted(set(game_dates)):
+			final = self.build_player_log(game_date)
+			with self.conn:
+				self.conn.execute("DELETE FROM {} WHERE game_date = ?".format(table), (game_date,))
+			self.insert_data(final, table)
+
+	def build_player_log(self, game_date):
+		'''Pulls every source for one date and returns rows shaped like plyrLogs (nothing is written).
+		Always one date: the rebounding (LeagueDashPtStats) and shot-location (LeagueDashPlayerShotLocations) sources are
+		dashboards that sum over their date range, so a multi-date call returns range totals, not per-game values.
+		Sources: PlayerGameLogs (box score), PlayByPlayV3 (first baskets), LeagueDashPtStats (rebounding),
+		BoxScoreAdvancedV3 (ratings, pace, starter), LeagueDashPlayerShotLocations (shot zones).
+		Input: game date YYYY-MM-DD
+		Output: DataFrame with plyrLogs columns
+		'''
+		game_dates = [game_date]
+		log = self.get_logs(game_dates)
 		time.sleep(np.random.randint(1, 15))
 		bskt = self.get_first_buckets(game_dates)
 		time.sleep(np.random.randint(1, 15))
@@ -89,13 +105,49 @@ class etl(base):
 						 'defensiveRating',
 						 'usagePercentage', 'pace', 'possessions', 'Starter', 'team_first', 'game_first']
 		final = final.filter(pd.read_sql('select * from plyrLogs limit 1', self.conn).columns.values)
-		if (pd.read_sql("select count(*) as ct from {} where game_date in ({})".format(table, strD),
-						self.conn).sum() > 0).all():
-			self.conn.execute("DELETE FROM {} where game_date in ({})".format(table, strD))
-			self.conn.commit()
-		self.insert_data(final, table)
-		#return final
-		
+		return final
+
+	def fill_player_log(self, season, end=None):
+		'''Fills plyrLogs with every regular-season player-game that is missing, one date at a time.
+		Works for a whole season (empty table) or a repair (a few missing games). Never overwrites a played row.
+		1. One PlayerGameLogs call lists every player-game played in the season before end (default today).
+		2. Deletes that season's past placeholder rows (min IS NULL, game_date before end). The daily load replaces a
+		   date's placeholders with real rows, so any left are stale schedule rows from a roster change (the old
+		   trade_update deleted played games and added the new team's schedule).
+		3. For each date with a missing player-game, builds the date from every source and inserts only the missing rows.
+		Stop and re-run at any time: finished dates have nothing missing. Rebuild the derived tables afterward
+		(the morning pipeline does).
+		Inputs: season YYYY-YY, optional end date YYYY-MM-DD (exclusive)
+		Output: DataFrame of the player-games still missing (empty when complete)
+		'''
+		end = end or time.strftime('%Y-%m-%d')
+		prefix = '002{}%'.format(season[2:4])
+		played = PlayerGameLogs(season_nullable=season, season_type_nullable='Regular Season', league_id_nullable='00',
+			timeout=60).get_data_frames()[0][['PLAYER_ID', 'GAME_ID', 'GAME_DATE']]
+		played = played.assign(player_id=played.PLAYER_ID.astype(str), game_id=played.GAME_ID.astype(str),
+			game_date=played.GAME_DATE.str[:10])[['player_id', 'game_id', 'game_date']]
+		played = played[played.game_id.str.startswith('002') & (played.game_date < end)]
+		with self.conn:
+			gone = self.conn.execute("DELETE FROM plyrLogs WHERE game_id LIKE ? AND min IS NULL AND game_date < ?",
+				(prefix, end)).rowcount
+		logger.info('{}: removed {:,} stale placeholder rows'.format(season, gone))
+		def still_missing():
+			have = pd.read_sql("SELECT player_id, game_id FROM plyrLogs WHERE game_id LIKE ? AND min > 0", self.conn, params=[prefix])
+			m = played.merge(have.astype(str), how='left', on=['player_id', 'game_id'], indicator=True)
+			return m[m._merge == 'left_only'].drop(columns='_merge')
+		missing = still_missing()
+		logger.info('{}: {:,} player-games missing over {:,} dates'.format(season, len(missing), missing.game_date.nunique()))
+		for game_date in tqdm(sorted(missing.game_date.unique())):
+			need = missing[missing.game_date == game_date][['player_id', 'game_id']]
+			final = self.build_player_log(game_date)
+			final = final.astype({'player_id': str, 'game_id': str}).merge(need, on=['player_id', 'game_id'])
+			self.insert_data(final, 'plyrLogs', verbose=False)
+			logger.info('{}: added {} of {} missing player-games'.format(game_date, len(final), len(need)))
+			time.sleep(np.random.randint(5, 15))
+		left = still_missing()
+		logger.info('{}: {:,} player-games still missing'.format(season, len(left)))
+		return left
+
 	def update_period_log(self, seasons, qtr=1):
 		'''Fills plyrQ{qtr}Logs with one quarter's player box scores from PlayerGameLogs (period_nullable=qtr).
 		One call per season returns every player-game, so a season takes seconds, not a per-game crawl.
