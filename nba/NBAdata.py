@@ -61,28 +61,6 @@ class data(base):
                 adds[col] = 0
         self.insert_data(adds.filter(saCols), 'shotsAllowed')
 
-    def trade_update(self, df):
-        '''dataframe with player_id,name, trade_date and new_team.
-		Will update rosters with the new players and print out a statement stating how many rows have been changed for each player
-		Inputs: dataframe; with columns: player_id, newTeam, tradeDate
-		Output: None, print statement for update
-		'''
-        for date in df.trade_date.unique():
-            pids = ','.join(df.player_id.unique())
-            self.cur.execute("DELETE FROM plyrLogs WHERE player_id in ({})  and game_date >= '{}' ".format(pids, date))
-            self.conn.commit()
-            # update player's schedule with new team
-            lst = df.filter(['player_id', 'new_team', 'trade_date']).values
-            for l in lst:
-                q = "select '{}' as player_id,team_id,game_date,game_id from teamLog where team_id = '{}' and game_date > '{}'".format(
-                    *l)
-                new = pd.read_sql(q, self.conn)
-                pcols = pd.read_sql('select * from plyrLogs limit 1', self.conn).columns
-                for col in pcols:
-                    if col not in new.columns:
-                        new[col] = None
-                self.insert_data(new.filter(pcols), 'plyrLogs')
-
     def threes_pipe(self, df):
         '''Will generate the data needed to generate predictions for threes
         Inputs: str for game date formatted as YYYY-MM-DD
