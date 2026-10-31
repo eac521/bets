@@ -135,7 +135,7 @@ def test_pull_open_skips_when_today_has_one(od, monkeypatch):
 @pytest.fixture
 def conn():
     c = sqlite3.connect(':memory:')
-    c.execute('CREATE TABLE bets (player_id, date, market, over_under, number, bet_book, final_line, bet_amount, user)')
+    c.execute('CREATE TABLE bets (player_id, date, market, over_under, number, bet_book, final_line, bet_amount, user, boost REAL DEFAULT 0, free_bet INTEGER DEFAULT 0)')
     c.execute('CREATE TABLE plyrLogs (player_id TEXT, game_date TEXT, min FLOAT, lc_fgm INT, rc_fgm INT, abv_fgm INT)')
     c.executemany('INSERT INTO plyrLogs VALUES (?,?,?,?,?,?)', [
         ('1', '2026-10-21', 30, 1, 0, 2),   # 3 threes
@@ -143,7 +143,7 @@ def conn():
         ('3', '2026-10-21', 0, None, None, None),  # DNP
         ('1', '2026-10-22', 31, 0, 0, 0),   # 0 threes
     ])
-    c.executemany('INSERT INTO bets VALUES (?,?,?,?,?,?,?,?,?)', [
+    c.executemany('INSERT INTO bets (player_id, date, market, over_under, number, bet_book, final_line, bet_amount, user) VALUES (?,?,?,?,?,?,?,?,?)', [
         (1, '2026-10-21', 'threes', 'Over', 2.5, 'FanDuel', 150, 10, 'EAC'),    # win +15
         (2, '2026-10-21', 'threes', 'Over', 1.5, 'FanDuel', -120, 12, 'EAC'),   # loss -12
         (3, '2026-10-21', 'threes', 'Under', 1.5, 'FanDuel', -110, 11, 'EAC'),  # void
@@ -158,6 +158,23 @@ def test_settle_bets(conn):
     df = funcs.odds.settle_bets(conn, 'EAC', '2026-10-01').sort_values(['date', 'player_id'])
     assert df.status.tolist() == ['win', 'loss', 'void', 'loss', 'pending']
     assert df.profit.round(2).tolist() == [15.0, -12.0, 0.0, -20.0, 0.0]
+
+
+def test_settle_boost_and_free_bet(conn):
+    conn.execute("INSERT INTO plyrLogs VALUES ('2', '2026-10-24', 25, 0, 1, 0)")  # 1 three
+    conn.executemany('INSERT INTO bets VALUES (?,?,?,?,?,?,?,?,?,?,?)', [
+        (2, '2026-10-24', 'threes', 'Under', 1.5, 'FanDuel', 100, 10, 'EAC', .25, 0),     # boosted win: 10 x 1.0 x 1.25 = +12.5
+        (2, '2026-10-24', 'threes', 'Under', 0.5, 'DraftKings', 150, 10, 'EAC', 0, 1),    # free bet loss: 0
+    ])
+    df = funcs.odds.settle_bets(conn, 'EAC', '2026-10-24').sort_values('number', ascending=False)
+    assert df.status.tolist() == ['win', 'loss']
+    assert df.profit.round(2).tolist() == [12.5, 0.0]
+
+
+def test_scheduled_rows_stay_pending(conn):
+    conn.execute("INSERT INTO plyrLogs VALUES ('1', '2026-10-23', NULL, NULL, NULL, NULL)")  # schedule row, game not played yet
+    df = funcs.odds.settle_bets(conn, 'EAC', '2026-10-23')
+    assert df.status.tolist() == ['pending']
 
 
 def test_bankroll_sets_aside_share_of_profit_high(od, conn):

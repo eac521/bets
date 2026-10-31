@@ -182,16 +182,17 @@ class odds():
         '''
         Settles threes bets from the box scores: over wins if threes made > line, under if < line.
         void = box scores loaded for that date but the player didn't log minutes (DNP); pending = box scores not loaded yet.
+        boost = profit boost as a fraction (.25 = 25%) on top of final_line; free_bet = 1 means a loss costs nothing.
         Inputs: sqlite connection, user, first date to include (YYYY-MM-DD)
         Output: DataFrame of bets with status and profit
         '''
         df = pd.read_sql('''
-            SELECT b.date, b.player_id, b.over_under, b.number, b.bet_book, b.final_line, b.bet_amount,
+            SELECT b.date, b.player_id, b.over_under, b.number, b.bet_book, b.final_line, b.bet_amount, b.boost, b.free_bet,
                    pl.min, COALESCE(pl.lc_fgm,0) + COALESCE(pl.rc_fgm,0) + COALESCE(pl.abv_fgm,0) AS made,
                    ld.d AS loaded
             FROM bets b
             LEFT JOIN plyrLogs pl ON CAST(pl.player_id AS INTEGER) = CAST(b.player_id AS INTEGER) AND date(pl.game_date) = b.date
-            LEFT JOIN (SELECT DISTINCT date(game_date) AS d FROM plyrLogs WHERE date(game_date) >= ?) ld ON ld.d = b.date
+            LEFT JOIN (SELECT DISTINCT date(game_date) AS d FROM plyrLogs WHERE date(game_date) >= ? AND min > 0) ld ON ld.d = b.date
             WHERE b.user = ? AND b.market = 'threes' AND b.date >= ? AND b.bet_amount IS NOT NULL
         ''', conn, params=[since, user, since])
         played = df['min'].fillna(0) > 0
@@ -199,7 +200,8 @@ class odds():
         df['status'] = np.select([df.loaded.isna(), ~played, won], ['pending', 'void', 'win'], 'loss')
         price = df.final_line.astype(float)
         mult = np.where(price > 0, price / 100, 100 / price.abs())
-        df['profit'] = np.select([df.status == 'win', df.status == 'loss'], [df.bet_amount * mult, -df.bet_amount], 0.0)
+        df['profit'] = np.select([df.status == 'win', df.status == 'loss'],
+                                 [df.bet_amount * mult * (1 + df.boost.fillna(0)), np.where(df.free_bet.fillna(0) == 1, 0.0, -df.bet_amount)], 0.0)  # boost = profit boost; a free bet's stake isn't ours
         return df
 
     def current_bankroll(self, conn, user, start=1000, keep=.8, since='2026-10-01'):

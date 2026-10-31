@@ -219,28 +219,53 @@ with bets_tab:
             for b in prim:
                 best_amt = best_amt.mask(filtered['best_book'] == b, filtered['{}Amount'.format(PREFIX[b])])
             filtered['wager'] =  (best_amt.clip(lower=0) / 0.25).round() * 0.25
+            best_ev = pd.Series(float('nan'), index=filtered.index)
+            for b in prim:
+                best_ev = best_ev.mask(filtered['best_book'] == b, filtered['{}EV'.format(PREFIX[b])])
+            filtered['ev'] = best_ev
+            filtered['line'] = best_price
+            filtered['price'] = float('nan')  # price actually taken; blank = the chosen book's line
+            filtered['boost'] = 0.0  # profit boost %, e.g. 25 for a 25% boost
+            filtered['free_bet'] = False
 
             # Display with inline editing
             ev_config = {col: st.column_config.NumberColumn(col, format='percent') for col in filtered.columns if col.endswith('EV')}
             ev_config.update({col: st.column_config.NumberColumn(col, format='dollar') for col in filtered.columns if col.endswith('Amount')})
             edited = st.data_editor(
                 filtered,
+                column_order=['bet', 'name', 'team', 'over_under', 'number', 'model_line', 'line', 'best_book', 'ev', 'beats',
+                              'book', 'price', 'boost', 'free_bet', 'wager'],  # everything else stays in the frame, hidden
+                disabled=['name', 'team', 'over_under', 'number', 'model_line', 'line', 'best_book', 'ev', 'beats'],
                 column_config={
                     'bet': st.column_config.CheckboxColumn('Bet?'),
+                    'over_under': st.column_config.TextColumn('O/U'),
+                    'number': st.column_config.NumberColumn('Line', format='%.1f'),
+                    'model_line': st.column_config.NumberColumn('Model', format='%d'),
+                    'line': st.column_config.NumberColumn('Best', format='%d'),
+                    'best_book': st.column_config.TextColumn('Best book'),
+                    'ev': st.column_config.NumberColumn('EV', format='percent'),
+                    'beats': st.column_config.TextColumn('Beats best', help='Secondary book with a better price than the best primary book'),
                     'book': st.column_config.SelectboxColumn('Book', options=BOOKS + ['None']),
+                    'price': st.column_config.NumberColumn('Price taken', help="Blank = the chosen book's line", format='%d', step=1),
+                    'boost': st.column_config.NumberColumn('Boost %', min_value=0, max_value=100, step=5, format='%d%%'),
+                    'free_bet': st.column_config.CheckboxColumn('Free bet'),
                     'wager': st.column_config.NumberColumn('Wager ($)', min_value=0.0, step=.25, format='$%.2f'),
-                    'player_id': None,  # hides the column
                     **ev_config,
                 },
                 width = 'content',
                 hide_index=True,
             )
+            with st.expander('All book prices'):
+                odds_cols = [v['odds_col'] for v in BOOK_META.values() if v['odds_col'] in filtered.columns]
+                st.dataframe(filtered[['name', 'over_under', 'number', 'model_line'] + odds_cols], hide_index=True, width='content')
     if st.button('Save Bets') and edited is not None:
         selected = edited[edited['bet'] == True]
         if selected.empty:
             st.warning('No bets selected.')
         elif (selected['book'] == 'None').any():
             st.error('Select a book for all checked bets.')
+        elif selected.apply(lambda r: pd.isna(r['price']) and pd.isna(r.get(r['book'])), axis=1).any():
+            st.error("Enter the price taken where the chosen book has no line.")
         else:
             bet_date = run_date
             save_df = pd.DataFrame({
@@ -250,9 +275,11 @@ with bets_tab:
                 'over_under': selected['over_under'].values,
                 'number': selected['number'].values,
                 'bet_book': selected['book'].values,
-                'final_line': selected.apply(lambda r: r[r['book']], axis=1).values,
+                'final_line': selected.apply(lambda r: r['price'] if pd.notna(r['price']) else r.get(r['book']), axis=1).values,
                 'bet_amount': selected['wager'].values,
                 'user': active_user,
+                'boost': (selected['boost'].fillna(0) / 100).values,
+                'free_bet': selected['free_bet'].fillna(False).astype(int).values,
             })
             etl.insert_data(save_df, 'bets')
             load_current_plays.clear()
