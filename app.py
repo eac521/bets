@@ -62,8 +62,8 @@ bankroll = st.sidebar.number_input(
     value = float(br['bankroll']),
     format='%.2f'
 )
-st.sidebar.caption('Start ${:,.0f} · settled P&L ${:,.2f} · set aside ${:,.2f} · {} bets pending'.format(
-    START_BANKROLL, br['pnl'], br['set_aside'], br['pending']))
+st.sidebar.caption('Start ${:,.0f} · model P&L ${:,.2f} · other ${:,.2f} · set aside ${:,.2f} · {} bets pending'.format(
+    START_BANKROLL, br['pnl'], br['other'], br['set_aside'], br['pending']))
 od.budget = bankroll
 
 

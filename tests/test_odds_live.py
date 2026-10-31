@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import datetime as dt
 import pandas as pd
@@ -180,10 +181,19 @@ def test_scheduled_rows_stay_pending(conn):
 def test_bankroll_sets_aside_share_of_profit_high(od, conn):
     # day 1: +3 (peak) -> 0.6 set aside; day 2: -20 -> cum -17
     br = od.current_bankroll(conn, 'EAC', start=1000, keep=.8, since='2026-10-01')
-    assert br == {'bankroll': 982.4, 'pnl': -17.0, 'set_aside': 0.6, 'pending': 1}
+    assert br == {'bankroll': 982.4, 'pnl': -17.0, 'other': 0.0, 'set_aside': 0.6, 'pending': 1}
 
 
 def test_bankroll_losses_count_in_full_below_start(od, conn):
     conn.execute("DELETE FROM bets WHERE date = '2026-10-21'")
     br = od.current_bankroll(conn, 'EAC', start=1000, keep=.8, since='2026-10-01')
     assert br['bankroll'] == 980.0 and br['set_aside'] == 0.0
+
+
+def test_bankroll_adds_adjustments(od, conn):
+    conn.execute(open(os.path.join(os.path.dirname(__file__), '..', 'nba', 'data', 'sql', 'migrate_bankroll_adjustments.sql')).read())
+    conn.execute("INSERT INTO bankroll_adjustments VALUES ('x1', '2026-10-22', 'EAC', 'h2h', 50, 'race to 5')")
+    # model: day 1 +3, day 2 -20; adjustment day 2 +50 -> cum +3, +33 (new high)
+    br = od.current_bankroll(conn, 'EAC', start=1000, keep=.8, since='2026-10-01')
+    assert br['pnl'] == -17.0 and br['other'] == 50.0
+    assert br['set_aside'] == 6.6 and br['bankroll'] == 1026.4
