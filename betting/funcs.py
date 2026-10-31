@@ -209,13 +209,17 @@ class odds():
         Daily Kelly bankroll: starting bankroll + settled P&L, minus 20% of each new profit high set aside.
         Losses count in full; set-aside money never comes back (a high-water skim, like withdrawing it).
         Inputs: sqlite connection, user, starting bankroll, share of profits kept in the bankroll, season start date
-        Output: dict with bankroll, pnl, set_aside, pending (count of unsettled bets)
+        Output: dict with bankroll, pnl (model plays), other (live / H2H / parlays from bankroll_adjustments), set_aside, pending
         '''
         df = self.settle_bets(conn, user, since)
-        cum = df[df.status.isin(['win', 'loss'])].groupby('date').profit.sum().sort_index().cumsum()
-        pnl = cum.iloc[-1] if len(cum) else 0.0
+        model = df[df.status.isin(['win', 'loss'])].groupby('date').profit.sum()
+        has_adj = conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'bankroll_adjustments'").fetchone()
+        adj = pd.read_sql('SELECT date, SUM(amount) AS profit FROM bankroll_adjustments WHERE user = ? AND date >= ? GROUP BY date',
+                          conn, params=[user, since]).set_index('date').profit if has_adj else pd.Series(dtype=float)
+        cum = pd.concat([model, adj]).groupby(level=0).sum().sort_index().cumsum()
+        total = cum.iloc[-1] if len(cum) else 0.0
         set_aside = (1 - keep) * max(cum.max(), 0) if len(cum) else 0.0
-        return {'bankroll': round(start + pnl - set_aside, 2), 'pnl': round(pnl, 2),
+        return {'bankroll': round(start + total - set_aside, 2), 'pnl': round(model.sum(), 2), 'other': round(adj.sum(), 2),
                 'set_aside': round(set_aside, 2), 'pending': int((df.status == 'pending').sum())}
 
     def kellyCrit(self,prob,odds,show=True):
