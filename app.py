@@ -23,6 +23,7 @@ data = NBAdata.data()
 from betting import funcs
 from betting.constants import books as BOOK_META
 import player_view
+import tracking_view
 od = funcs.odds()
 
 
@@ -75,10 +76,12 @@ if st.sidebar.button('Refresh Data (Override)'):
         logger.info('Manual data update refresh triggered by {}'.format(active_user))
 
 
-# ── Tabs: Bets and Player. The player tab is drawn first, so a st.stop() in the bets tab can't blank it. ──
-bets_tab, player_tab = st.tabs(['Bets', 'Player'])
+# ── Tabs: Bets, Player, Tracking. Player and Tracking are drawn first, so a st.stop() in the bets tab can't blank them. ──
+bets_tab, player_tab, tracking_tab = st.tabs(['Bets', 'Player', 'Tracking'])
 with player_tab:
     player_view.render(run_date)
+with tracking_tab:
+    tracking_view.render(active_user, START_BANKROLL, KEEP_SHARE, SEASON_START)
 
 with bets_tab:
     # ── Dashboard ──
