@@ -127,7 +127,7 @@ with bets_tab:
     def load_current_plays(user, date):
         """Load bets already placed today so they drop off the active list."""
         query = """
-            SELECT CAST(player_id AS INTEGER) AS player_id, over_under
+            SELECT CAST(player_id AS INTEGER) AS player_id, over_under, number
             FROM bets
             WHERE date = ?
             AND user = ?
@@ -169,15 +169,17 @@ with bets_tab:
         # Filter out bets already placed by this user
         open_bets = load_current_plays(active_user, run_date)
         if not open_bets.empty:
-            placed_keys = set(zip(open_bets['player_id'], open_bets['over_under']))
+            placed_keys = set(zip(open_bets['player_id'], open_bets['over_under'], open_bets['number']))  # a new line on a bet player still shows
             predictions = plays[
                 ~plays.apply(
-                    lambda row: (row['player_id'], row['over_under']) in placed_keys,
+                    lambda row: (row['player_id'], row['over_under'], row['number']) in placed_keys,
                     axis=1
                 )
             ]
+            held = open_bets.assign(held=open_bets.over_under.str[0] + open_bets.number.astype(str)).groupby('player_id').held.agg(', '.join).reset_index()
+            predictions = predictions.merge(held, how='left', on='player_id')  # lines already bet on this player, e.g. U0.5
         else:
-            predictions = plays
+            predictions = plays.assign(held=None)
 
         if predictions.empty:
             st.success('All bets placed for today!')
@@ -236,13 +238,14 @@ with bets_tab:
             ev_config.update({col: st.column_config.NumberColumn(col, format='dollar') for col in filtered.columns if col.endswith('Amount')})
             edited = st.data_editor(
                 filtered,
-                column_order=['bet', 'name', 'team', 'over_under', 'number', 'model_line', 'line', 'best_book', 'ev', 'beats',
+                column_order=['bet', 'name', 'team', 'over_under', 'number', 'held', 'model_line', 'line', 'best_book', 'ev', 'beats',
                               'book', 'price', 'boost', 'free_bet', 'wager'],  # everything else stays in the frame, hidden
-                disabled=['name', 'team', 'over_under', 'number', 'model_line', 'line', 'best_book', 'ev', 'beats'],
+                disabled=['name', 'team', 'over_under', 'number', 'held', 'model_line', 'line', 'best_book', 'ev', 'beats'],
                 column_config={
                     'bet': st.column_config.CheckboxColumn('Bet?'),
                     'over_under': st.column_config.TextColumn('O/U'),
                     'number': st.column_config.NumberColumn('Line', format='%.1f'),
+                    'held': st.column_config.TextColumn('Held', help='Lines already bet on this player today'),
                     'model_line': st.column_config.NumberColumn('Model', format='%d'),
                     'line': st.column_config.NumberColumn('Best', format='%d'),
                     'best_book': st.column_config.TextColumn('Best book'),
