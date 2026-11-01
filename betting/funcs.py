@@ -375,21 +375,24 @@ class odds():
         return over/(over+under) if side == "over" else under/(under+over)
 
     @staticmethod
-    def game_leaders(df, sims=10000):
-        results = []
+    def game_leaders(df, sims=20000, seed=None):
+        '''
+        Most-threes market: simulates every player's threes from his PMF, all sims at once (inverse CDF on a uniform matrix).
+        Ties are dead heats, as the books settle them: a k-way tie counts 1/k for each tied player.
+        Inputs: wide predictions (name, team, player_id, one column per number of threes), number of sims, optional seed
+        Output: (game leader table with Line and Win Rate, make-X table)
+        '''
         df = df.reset_index(drop=True)
-        cols = [x for x in df.columns if str(x).replace('.0', '').isdigit()]
-        int_cols = [int(c) for c in cols]
-        prob_matrix = (df[cols].values / df[cols].values.sum(axis=1, keepdims=True))
-
-        for _ in range(sims):
-            vals = np.array([np.random.choice(int_cols, p=prob_matrix[i]) for i in range(len(df))])
-            winner_idx = vals.argmax()
-            results.append((df.loc[winner_idx]['name'], vals[winner_idx]))
-
-        winner_counts = Counter([r[0] for r in results])
-        final = pd.DataFrame().from_dict(winner_counts, orient='index', columns=['Wins'])
-        final['Win Rate'] = final.Wins / sims
+        cols = sorted([x for x in df.columns if str(x).replace('.0', '').isdigit()], key=lambda c: int(float(c)))
+        int_cols = np.array([int(float(c)) for c in cols])
+        prob_matrix = df[cols].fillna(0).values / df[cols].fillna(0).values.sum(axis=1, keepdims=True)
+        cdf = prob_matrix.cumsum(axis=1)
+        u = np.random.default_rng(seed).random((sims, len(df), 1))
+        vals = int_cols[np.minimum((u > cdf[None, :, :]).sum(axis=2), len(cols) - 1)]  # sims x players
+        tied = vals == vals.max(axis=1, keepdims=True)
+        win_rate = (tied / tied.sum(axis=1, keepdims=True)).mean(axis=0)
+        final = pd.DataFrame({'Win Rate': win_rate}, index=df['name'])
+        final = final[final['Win Rate'] > 0]
         final['Line'] = [odds.convertPercentToOdds(x) for x in final['Win Rate']]
         gl =final.sort_values(by='Win Rate', ascending=False)[['Line', 'Win Rate']]
         makeX = (1 - (1 - (df.iloc[:, 4:].T.sort_index(ascending=False).cumsum())).product(axis=1)).round(5)

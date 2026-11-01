@@ -312,7 +312,10 @@ with bets_tab:
 
 
     if game_filter != 'All':
-        gl, makeX = run_game_leaders(game_filter, special_market)
+        excluded = st.multiselect('Exclude players', sorted(special_market['name'].unique()),
+                                  help="Use for players who are out (or voided by the book). Leaving out a player who will play "
+                                       "overstates everyone else's chances.")
+        gl, makeX = run_game_leaders(game_filter, special_market[~special_market['name'].isin(excluded)])
         col1, col2 = st.columns(2)
         col1.subheader('Game Leader')
         col1.dataframe(gl.style.format({'Win Rate': '{:.1%}'}))
