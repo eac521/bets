@@ -1,18 +1,22 @@
 """
-Player tab: pick a team, then a player from its roster. Recent threes trend (last 5 / 10 / 30 games),
-the day's prediction vs the books, prediction-vs-actual history, and bet history for that player.
+Player tab: pick a team, then a player from its roster. Recent threes (trend windows next to the game log),
+the day's prediction vs the books, and each primary book's line movement over his last 10 games (threes or points).
 Rendered by app.py as its second tab: player_view.render(date).
 """
 import datetime as dt
+import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
 
 from nba import NBAbase
+from betting import market as mk
 from betting.funcs import odds
 from nba_api.stats.static import teams as nba_teams
 
 db = NBAbase.base()
+od = odds()
+MARKETS = {'Threes': ('player_threes', 'fg3m'), 'Points': ('player_points', 'pts')}
 
 BOOKS = ['FanDuel', 'DraftKings', 'theScore_Bet']
 WINDOWS = [5, 10, 30]
@@ -63,7 +67,7 @@ def predicted_ids(date):
 @st.cache_data(ttl=300)
 def game_log(player_id, date):
     q = '''SELECT substr(game_date,1,10) AS game_date, season, team, opponent, home, min,
-                  threesMade AS fg3m, threesAtt AS fg3a
+                  threesMade AS fg3m, threesAtt AS fg3a, pts
            FROM pgames
            WHERE player_id = ? AND game_date < ? AND min > 0
            ORDER BY game_date DESC'''
@@ -84,14 +88,33 @@ def lines_today(player_id, date):
     return pd.read_sql(q, db.conn, params=[str(player_id), date])
 
 
-@st.cache_data(ttl=300)
-def bet_history(player_id):
-    q = '''SELECT b.date, b.over_under, b.number, b.bet_book, b.final_line, b.bet_amount, b.user,
-                  g.threesMade AS fg3m, g.min
-           FROM bets b
-           LEFT JOIN pgames g ON g.player_id = b.player_id AND substr(g.game_date,1,10) = b.date
-           WHERE b.player_id = ? ORDER BY b.date DESC'''
-    return pd.read_sql(q, db.conn, params=[str(player_id)])
+@st.cache_data(ttl=600)
+def book_snapshots(dates, market):
+    '''Primary-book snapshot rows for one market on the given dates (tuple, for caching).'''
+    frames = []
+    for d in dates:
+        s = od.read_snapshots(d)
+        if not s.empty:
+            frames.append(s[(s.market == market) & s.book.isin(mk.PRIMARY)])
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def line_movement(name, dates, market, threes):
+    '''First and last snapshot of each day per primary book: main line, de-vigged P(over) and (threes) implied mean.'''
+    snap = book_snapshots(tuple(dates), market)
+    if snap.empty:
+        return pd.DataFrame()
+    snap = snap[snap.player_name.map(mk.norm_name) == mk.norm_name(name)]
+    ml = mk.main_line(mk.two_way(snap))
+    if ml.empty:
+        return pd.DataFrame()
+    ml = ml.sort_values('snapshot_ts')
+    first = ml.groupby(['game_date', 'book']).head(1).assign(when='open')
+    last = ml.groupby(['game_date', 'book']).tail(1).assign(when='close')
+    out = pd.concat([first, last])
+    out['book'] = out.book.map(mk.BOOK_COL)
+    out['implied_mean'] = [mk.poisson_mean(l, p) for l, p in zip(out.line, out.p_over)] if threes else np.nan
+    return out[['game_date', 'book', 'when', 'line', 'over', 'under', 'p_over', 'implied_mean']]
 
 
 def window_summary(log, n):
@@ -148,13 +171,19 @@ def render(date):
     for f in flags:
         st.warning(f)
 
-    # ── Trend table ──
+    # ── Recent threes: trend windows next to the game log ──
     st.subheader('Recent threes')
     rows = [window_summary(log, n) for n in WINDOWS]
     rows.append(dict(window_summary(this_season, len(this_season)) or {}, window='This season') if len(this_season) else None)
     rows.append(dict(window_summary(last_season, len(last_season)) or {}, window='Last season') if len(last_season) else None)
     trend = pd.DataFrame([r for r in rows if r])
-    st.dataframe(trend.style.format({'3PM': '{:.2f}', '3PA': '{:.2f}', '3P%': '{:.1%}', 'MIN': '{:.1f}', '3PA per 36': '{:.2f}'}),
+    gl = log.head(10).copy()
+    gl['3P%'] = gl.fg3m / gl.fg3a.replace(0, np.nan)
+    gl = gl.rename(columns={'fg3m': '3PM', 'fg3a': '3PA', 'min': 'MIN', 'game_date': 'date', 'opponent': 'opp'})
+    c1, c2 = st.columns([5, 6])
+    c1.dataframe(trend.style.format({'3PM': '{:.2f}', '3PA': '{:.2f}', '3P%': '{:.1%}', 'MIN': '{:.1f}', '3PA per 36': '{:.2f}'}),
+                 hide_index=True, width='content')
+    c2.dataframe(gl[['date', 'opp', 'MIN', '3PM', '3PA', '3P%']].style.format({'MIN': '{:.1f}', '3P%': '{:.0%}'}, na_rep='-'),
                  hide_index=True, width='content')
 
     # ── Today's prediction ──
@@ -188,41 +217,32 @@ def render(date):
         st.dataframe(ladder.style.format(fmt, na_rep='-'), hide_index=True, width='content')
         st.caption('EV uses the raw model probability against the best stored price; claimed edges run 2-4x the realized ones.')
 
-    # ── Prediction vs actual ──
-    st.subheader('Prediction vs actual')
-    start = log.head(30).game_date.min()
-    ph = predictions(pid, start, date)
-    if ph.empty:
-        st.info('No stored predictions for these games (predictions are stored from 2026-03-23).')
-    else:
-        means = ph.assign(x=ph.number * ph.model_prob).groupby('date').x.sum().rename('model mean')
-        hist = log.head(30).set_index('game_date')[['fg3m', 'fg3a']].rename(columns={'fg3m': '3PM', 'fg3a': '3PA'})
-        hist = hist.join(means, how='left').sort_index()
-        st.line_chart(hist[['3PM', 'model mean']])
-        st.bar_chart(hist['3PA'])
-
-    # ── Game log ──
-    st.subheader('Game log (last 10)')
-    gl = log.head(10).copy()
-    gl['3P%'] = gl.fg3m / gl.fg3a.replace(0, np.nan)
-    gl = gl.rename(columns={'fg3m': '3PM', 'fg3a': '3PA', 'min': 'MIN'})[['game_date', 'team', 'opponent', 'MIN', '3PM', '3PA', '3P%']]
-    st.dataframe(gl.style.format({'MIN': '{:.1f}', '3P%': '{:.0%}'}, na_rep='-'), hide_index=True, width='content')
-
-    # ── Bet history ──
-    st.subheader('Bets on {}'.format(name))
-    bh = bet_history(pid)
-    if bh.empty:
-        st.info('No bets logged on this player.')
-    else:
-        bh['d'] = bh.final_line.apply(lambda x: decimal(x) if pd.notna(x) and x != 0 else np.nan)
-        won = np.where(bh.over_under == 'Over', bh.fg3m > bh.number, bh.fg3m < bh.number)
-        bh['result'] = np.where(bh.fg3m.isna(), 'open/void', np.where(won, 'W', 'L'))
-        bh['profit'] = np.where(bh.result == 'W', bh.bet_amount * (bh.d - 1), np.where(bh.result == 'L', -bh.bet_amount, 0.0))
-        settled = bh[bh.result.isin(['W', 'L'])]
-        c1, c2, c3 = st.columns(3)
-        c1.metric('Record', '{}-{}'.format((settled.result == 'W').sum(), (settled.result == 'L').sum()))
-        c2.metric('Profit', '${:,.2f}'.format(settled.profit.sum()))
-        c3.metric('ROI', '{:.1%}'.format(settled.profit.sum() / settled.bet_amount.sum()) if len(settled) else '-')
-        st.dataframe(bh[['date', 'over_under', 'number', 'bet_book', 'final_line', 'bet_amount', 'fg3m', 'result', 'profit', 'user']]
-                     .style.format({'bet_amount': '${:.2f}', 'profit': '${:+.2f}', 'number': '{:.1f}'}, na_rep='-'),
-                     hide_index=True, width='content')
+    # ── Line movement by book, last 10 games ──
+    st.subheader('Line movement by book')
+    mkt = st.radio('Market', list(MARKETS), horizontal=True, key='player_tab_market')
+    market, stat = MARKETS[mkt]
+    games = log.head(10)[['game_date', 'opponent', stat]].rename(columns={stat: 'actual'})
+    dates = sorted(set(games.game_date) | {date})
+    mv = line_movement(name, dates, market, mkt == 'Threes')
+    if mv.empty:
+        st.info('No {} lines stored for {} in these games (live snapshots start Oct 27, 2026).'.format(mkt.lower(), name))
+        return
+    mv['label'] = ['{:g} · {:.0%}'.format(l, p) for l, p in zip(mv.line, mv.p_over)]
+    tbl = mv.pivot_table(index='game_date', columns=['book', 'when'], values='label', aggfunc='first')
+    order = [(b, w) for b in ['FanDuel', 'DraftKings', 'BetMGM'] for w in ['open', 'close'] if (b, w) in tbl.columns]
+    tbl = tbl[order]
+    tbl.columns = ['{} {}'.format(b, w) for b, w in tbl.columns]
+    tbl = games.set_index('game_date').join(tbl, how='right').sort_index(ascending=False)
+    st.dataframe(tbl, width='content')
+    st.caption('Main line · de-vigged P(over), at the first and last snapshot of each day. Today shows the latest prices.')
+    close = mv[mv.when == 'close'].copy()
+    y = 'implied_mean' if mkt == 'Threes' else 'line'
+    ytitle = 'Implied mean threes (close)' if mkt == 'Threes' else 'Points line (close)'
+    lines = alt.Chart(close).mark_line(point=True, strokeWidth=2).encode(
+        x=alt.X('game_date:O', title=None), y=alt.Y('{}:Q'.format(y), title=ytitle),
+        color=alt.Color('book:N', title='Book'),
+        tooltip=['game_date', 'book', alt.Tooltip('line:Q'), alt.Tooltip('p_over:Q', format='.0%', title='P(over)'),
+                 alt.Tooltip('implied_mean:Q', format='.2f')])
+    actual = alt.Chart(games[games.game_date.isin(close.game_date)]).mark_point(filled=True, size=70, color='#555').encode(
+        x='game_date:O', y='actual:Q', tooltip=['game_date', 'opponent', 'actual'])
+    st.altair_chart(lines + actual, width='stretch')
