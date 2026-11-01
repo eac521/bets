@@ -375,7 +375,7 @@ class odds():
         return over/(over+under) if side == "over" else under/(under+over)
 
     @staticmethod
-    def game_leaders(df, sims=10000, seed=None):
+    def game_leaders(df, sims=20000, seed=None):
         '''
         Most-threes market: simulates every player's threes from his PMF, all sims at once (inverse CDF on a uniform matrix).
         Ties are dead heats, as the books settle them: a k-way tie counts 1/k for each tied player.
