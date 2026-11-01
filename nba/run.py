@@ -43,6 +43,37 @@ def data_pull(run_date=None):
     data.refresh_materialized_tables()
 
 
+def fill_missing(days=7, today=None):
+    '''
+    Re-pulls any of the last `days` dates where a scheduled game is missing box scores or team logs, and fills Q1 logs.
+    The daily run only pulls yesterday, so a date that failed both the 5:30 and 11:30 runs is otherwise never retried.
+    A game still missing box scores 2+ days later is logged as a warning (postponed, or the source is down).
+    inputs: number of days to look back, optional today (date) for testing
+    output: list of dates re-pulled
+    '''
+    today = today or dt.date.today()
+    start = (today - dt.timedelta(days=days)).strftime('%Y-%m-%d')
+    end = (today - dt.timedelta(days=1)).strftime('%Y-%m-%d')
+    gaps = etl.find_gaps(start, end)
+    redo = sorted(gaps.loc[(gaps.box == 0) | (gaps.team == 0), 'd'].unique())
+    for d in redo:
+        logger.info('Re-pulling {}: {} game(s) missing box scores or team logs'.format(
+            d, ((gaps.d == d) & ((gaps.box == 0) | (gaps.team == 0))).sum()))
+        try:
+            data_pull(d)
+        except Exception:
+            logger.exception('Re-pull failed for {}'.format(d))
+    if ((gaps.q1 == 0) & (gaps.box == 1)).any() or redo:
+        etl.update_period_log(sorted({etl.derive_season(d) for d in gaps.d}), qtr=1)
+    after = etl.find_gaps(start, end)
+    stale = after[(after.box == 0) & (after.d <= (today - dt.timedelta(days=2)).strftime('%Y-%m-%d'))]
+    for _, g in stale.iterrows():
+        logger.warning('Game {} on {} still has no box score'.format(g.game_id, g.d))
+    if not redo and stale.empty:
+        logger.info('No missing games {} to {}'.format(start, end))
+    return redo
+
+
 def run_model(model_name,date=None):
     '''
     Run function for the model, this will get the model and produce the predictions both in a long and wide format
@@ -81,6 +112,11 @@ def run_pipeline(model_name, run_date=None):
         # late games often aren't posted by the morning run; predict on what loaded and let the 11:30 retry fill in
         logger.exception('Data pull failed; refreshing tables and predicting on the data available')
         data.refresh_materialized_tables()
+    if run_date is None:
+        try:
+            fill_missing()
+        except Exception:
+            logger.exception('Missing-game check failed')
     result = subprocess.run([sys.executable, '-m', 'pytest', 'tests/', '-m', 'not integration', '-q'], capture_output=True)
     if result.returncode != 0:
         logger.warning('Validation tests failed; continuing with predictions')
@@ -97,11 +133,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', default='threes')
     parser.add_argument('--date', default=None)
-    parser.add_argument('--step', default='all', choices=['data', 'model', 'all'])
+    parser.add_argument('--step', default='all', choices=['data', 'model', 'fill', 'all'])
+    parser.add_argument('--days', type=int, default=7, help='lookback for --step fill')
     args = parser.parse_args()
     if args.step == 'data':
         data_pull(args.date)
     elif args.step == 'model':
         run_model(args.model, args.date)
+    elif args.step == 'fill':
+        print(fill_missing(args.days))
     else:
         run_pipeline(args.model, args.date)

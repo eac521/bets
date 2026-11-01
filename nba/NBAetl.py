@@ -173,6 +173,23 @@ class etl(base):
 			logger.info('{} {}: {:,} new player-games over {:,} games'.format(table, season, len(new), new.game_id.nunique()))
 			time.sleep(np.random.randint(5, 15))
 
+	def find_gaps(self, start, end):
+		'''Scheduled regular-season games between start and end (YYYY-MM-DD, inclusive) and which loads they're missing.
+		A game is scheduled when plyrLogs has its placeholder rows; box = any player logged minutes, team = in teamLog,
+		q1 = in plyrQ1Logs. Output: DataFrame with d, game_id, box, team, q1 (1 = loaded, 0 = missing).
+		'''
+		return pd.read_sql("""
+			SELECT date(p.game_date) AS d, p.game_id,
+			       COALESCE(MAX(p.min > 0), 0) AS box,
+			       MAX(t.game_id IS NOT NULL) AS team,
+			       MAX(q.game_id IS NOT NULL) AS q1
+			FROM plyrLogs p
+			LEFT JOIN (SELECT DISTINCT game_id FROM teamLog) t ON t.game_id = p.game_id
+			LEFT JOIN (SELECT DISTINCT game_id FROM plyrQ1Logs) q ON q.game_id = p.game_id
+			WHERE date(p.game_date) BETWEEN ? AND ? AND p.game_id LIKE '002%'
+			GROUP BY 1, 2
+			ORDER BY 1, 2""", self.conn, params=[start, end])
+
 	def update_teamLog(self,game_ids):
 		df = self.get_summary(game_ids)
 		strD = ','.join(["'{}'".format(d) for d in df.game_id.unique()])
