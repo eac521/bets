@@ -190,6 +190,14 @@ class etl(base):
 			GROUP BY 1, 2
 			ORDER BY 1, 2""", self.conn, params=[start, end])
 
+	def find_tracking_gaps(self, start, end):
+		'''Dates between start and end with box scores loaded but no playerTracking rows (tracking often lags the box score).'''
+		return pd.read_sql("""
+			SELECT DISTINCT date(game_date) AS d FROM plyrLogs
+			WHERE date(game_date) BETWEEN ? AND ? AND game_id LIKE '002%' AND min > 0
+			  AND date(game_date) NOT IN (SELECT DISTINCT date(game_date) FROM playerTracking WHERE date(game_date) BETWEEN ? AND ?)
+			ORDER BY 1""", self.conn, params=[start, end, start, end]).d.tolist()
+
 	def update_teamLog(self,game_ids):
 		df = self.get_summary(game_ids)
 		strD = ','.join(["'{}'".format(d) for d in df.game_id.unique()])
@@ -475,24 +483,21 @@ class etl(base):
 		return df
 
 	def get_open_player_shots(self,game_dates):
-		openness = ['6+ Feet - Wide Open','4-6 Feet - Open','2-4 Feet - Tight','0-2 Feet - Very Tight']
+		openness = {'6+ Feet - Wide Open': 'Wide_Open', '4-6 Feet - Open': 'Open', '2-4 Feet - Tight': 'Tight', '0-2 Feet - Very Tight': 'Very_Tight'}
 		l = []
-		d = pd.to_datetime(date)
-		season = self.derive_season(date)
-		for op in openness:
-			temp = LeagueDashPlayerPtShot(date_from_nullable=date,
-											date_to_nullable=date,
-											season=season,
-											close_def_dist_range_nullable=op
-											, timeout=60).get_data_frames()[0]
-			time.sleep(np.random.randint(2, 8))
-			df = temp.filter([col for col in temp.columns if re.search('[2-3][A|M]$|ID$', col) != None])
-			df.columns = [
-				'{}_{}'.format(op.replace(' ', '_'), col) if re.search('ID$', col) == None else col for
-				col in df.columns]
-			df['GAME_DATE'] = date
-			time.sleep(.8)
-			l.append(df)
+		for date in game_dates:
+			season = self.derive_season(date)
+			for op, label in openness.items():
+				temp = LeagueDashPlayerPtShot(date_from_nullable=date,
+												date_to_nullable=date,
+												season=season,
+												close_def_dist_range_nullable=op
+												, timeout=60).get_data_frames()[0]
+				time.sleep(np.random.randint(2, 8))
+				df = temp.filter([col for col in temp.columns if re.search('[2-3][A|M]$|ID$', col) != None])
+				df.columns = ['{}_{}'.format(label, col) if re.search('ID$', col) == None else col for col in df.columns]  # matches playerTracking
+				df['GAME_DATE'] = date
+				l.append(df)
 		final = pd.concat(l)
 		final = final.groupby(['PLAYER_ID', 'GAME_DATE']).sum().reset_index().drop(['PLAYER_LAST_TEAM_ID'], axis=1)
 		return final
@@ -742,8 +747,10 @@ class etl(base):
 		   'PULL_UP_FG3M', 'PULL_UP_FG3A', 'CATCH_SHOOT_FG2M', 'CATCH_SHOOT_FG2A',
 		   'CATCH_SHOOT_FG3M', 'CATCH_SHOOT_FG3A', 'PASSES_MADE',
 		   'PASSES_RECEIVED', 'FT_AST', 'SECONDARY_AST', 'POTENTIAL_AST',
-		   'AST_PTS_CREATED', 'AST_ADJ']
+		   'AST_PTS_CREATED', 'AST_ADJ'] + ['{}_{}'.format(o, s) for o in ['Wide_Open', 'Open', 'Tight', 'Very_Tight']
+		                                   for s in ['FG2M', 'FG2A', 'FG3M', 'FG3A']]
 			mergeCols = ['PLAYER_ID']
+			final = pd.DataFrame(columns=ord)
 			l = []
 			for date in tqdm(game_dates):
 
@@ -772,18 +779,19 @@ class etl(base):
 										   ,timeout=60).get_data_frames()[0]
 				passes = passes.filter(passCols)
 
-				pop = self.get_open_player_shots([date])
+				pop = self.get_open_player_shots([date]).drop(columns='GAME_DATE')  # drives already has GAME_DATE
 				games = drives.merge(pullups,how='left',on=mergeCols)
 				games = games.merge(catchSht,how='left',on=mergeCols)
 				games = games.merge(passes,how='left',on=mergeCols)
 				games = games.merge(pop,how='left',on=mergeCols)
 				l.append(games)
-			final = pd.concat(l)
-			self.insert_data(final.filter(ord),'playerTracking')
-			logger.info("{}: loaded {} player tracking rows".format(date, len(games)))
+			final = pd.concat(l).reindex(columns=ord)
+			final['PLAYER_ID'] = final.PLAYER_ID.astype(int).astype(str)  # stored as text, like the other tables
+			self.insert_data(final,'playerTracking')
+			logger.info("{}: loaded {} player tracking rows".format(', '.join(game_dates), len(final)))
 
 		except (KeyError, ValueError) as e:
 			logger.warning("{}: tracking data unavailable - {}".format(date, e))
-		return final.filter(ord)
+		return final.reindex(columns=ord)
 
 

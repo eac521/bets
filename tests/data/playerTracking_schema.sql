@@ -1,0 +1,21 @@
+CREATE TABLE playerTracking (
+player_id TEXT, 
+game_date TEXT,
+drive_fgm INT,
+drive_fga INT,
+drive_passes INT,
+drive_assists INT,drive_to INT,
+drive_fouls_drawn INT,pullup_fg2m INT,
+pullup_fg2a INT,pullup_fg3m INT,
+pullup_fg3a INT,
+catchshoot_fg2m INT,
+catchshoot_fg2a INT,
+catchshoot_fg3m INT,
+catchshoot_fg3a INT,
+passes INT,recs INT,
+ ft_ast INT, secondardy_ast INT,
+potential_assists INT,
+assist_pts_created INT, 
+adjusted_assists INT, Wide_Open_FG2M INT, Wide_Open_FG2A INT, Wide_Open_FG3M INT, Wide_Open_FG3A INT, Open_FG2M INT, Open_FG2A INT, Open_FG3M INT, Open_FG3A INT, Tight_FG2M INT, Tight_FG2A INT, Tight_FG3M INT, Tight_FG3A INT, Very_Tight_FG2M INT, Very_Tight_FG2A INT, Very_Tight_FG3M INT, Very_Tight_FG3A INT,
+PRIMARY KEY (player_id,game_date)
+);

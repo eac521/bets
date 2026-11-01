@@ -65,6 +65,13 @@ def fill_missing(days=7, today=None):
             logger.exception('Re-pull failed for {}'.format(d))
     if ((gaps.q1 == 0) & (gaps.box == 1)).any() or redo:
         etl.update_period_log(sorted({etl.derive_season(d) for d in gaps.d}), qtr=1)
+    track = etl.find_tracking_gaps(start, end)
+    for d in track:  # one date at a time, so a date whose tracking isn't posted yet doesn't block the others
+        logger.info('Pulling player tracking for {}'.format(d))
+        try:
+            etl.get_tracking_data([d])
+        except Exception:
+            logger.exception('Tracking pull failed for {}'.format(d))
     after = etl.find_gaps(start, end)
     stale = after[(after.box == 0) & (after.d <= (today - dt.timedelta(days=2)).strftime('%Y-%m-%d'))]
     for _, g in stale.iterrows():
