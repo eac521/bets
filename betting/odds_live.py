@@ -18,7 +18,9 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 import argparse
+import time
 import pandas as pd
+import requests
 
 from betting import funcs
 from betting.funcs import ET
@@ -50,7 +52,15 @@ if __name__ == '__main__':
         if args.pull == 'open':
             pull_open(od, args.force)
         elif args.pull == 'midday':
-            od.pull_snapshot('midday')
+            for attempt in range(4):  # The Odds API has short 502 outages (Oct 31 lost its midday): retry for ~15 minutes
+                try:
+                    od.pull_snapshot('midday')
+                    break
+                except requests.exceptions.HTTPError:
+                    if attempt == 3:
+                        raise
+                    logger.warning('midday pull failed (attempt {}), retrying in 5 minutes'.format(attempt + 1))
+                    time.sleep(300)
         else:
             pull_close(od)
     except Exception:
