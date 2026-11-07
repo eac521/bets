@@ -1,5 +1,6 @@
 # Changelog
 ## Unreleased
+- Each tab is a fragment (`st.fragment`): a filter or widget reruns only its own tab, not the sidebar and the other three tabs; Special Markets is its own fragment too
 - Query tab: ad hoc SQL on `nba.db` through a read-only connection (`mode=ro` + `query_only`), one statement per run, 30s limit, first 10,000 rows shown, CSV download, table/column reference
 - Bets tab: the editor and Save Bets sit in a form, so ticks and wagers don't rerun the app until Save; a "Saved N bets" toast confirms the save; rows with no main-book price or a $0 wager are dropped
 - Refresh Data (Override) clears every cached query after the data pull

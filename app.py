@@ -85,94 +85,75 @@ else:
                          column_config={'Amount': st.column_config.NumberColumn(format='$%.2f')}, hide_index=True)
 
 
-# ── Tabs: Bets, Player, Tracking, Query. The others are drawn first, so a st.stop() in the bets tab can't blank them. ──
-bets_tab, player_tab, tracking_tab, query_tab = st.tabs(['Bets', 'Player', 'Tracking', 'Query'])
-with player_tab:
-    player_view.render(run_date)
-with tracking_tab:
-    tracking_view.render(active_user, START_BANKROLL, KEEP_SHARE, SEASON_START)
-with query_tab:
-    query_view.render()
+# ── Bets tab data: cached so a rerun reads the same table until the cache expires or Refresh Lines / Save clears it ──
+def get_preds(MODEL_NAME,date,pivot=False):
+   df =  pd.read_sql('''SELECT name,team,p.player_id,number,model_prob FROM predictions p
+        LEFT JOIN pgames on pgames.player_id = p.player_id and date = game_date WHERE date = '{}' 
+        AND market = '{}' '''.format(date, MODEL_NAME), etl.conn)
+   if pivot:
+       wide = df.pivot_table(index=['name','team','player_id'],columns = 'number',values='model_prob').reset_index()
+       return wide
+   else:
+       return df
 
-with bets_tab:
-    # ── Dashboard ──
-    st.title('Bets to Place')
-    if 'saved_msg' in st.session_state:
-        st.toast(st.session_state.pop('saved_msg'))
-
-    def get_preds(MODEL_NAME,date,pivot=False):
-       df =  pd.read_sql('''SELECT name,team,p.player_id,number,model_prob FROM predictions p
-            LEFT JOIN pgames on pgames.player_id = p.player_id and date = game_date WHERE date = '{}' 
-            AND market = '{}' '''.format(date, MODEL_NAME), etl.conn)
-       if pivot:
-           wide = df.pivot_table(index=['name','team','player_id'],columns = 'number',values='model_prob').reset_index()
-           return wide
-       else:
-           return df
-
-    @st.cache_data(ttl=300)
-    def create_todays_bets(MODEL_NAME,date=None,value=0,test=False,bankroll=1000):
-        """
-        This will go through the process of running the model
-        """
-        od.budget = bankroll
-        date = date or dt.datetime.today().strftime('%Y-%m-%d')
-        wide = get_preds(MODEL_NAME,date,pivot=True)
-        preds = od.oddsTable(wide)
-        if test:
-            odf = pd.read_sql('''SELECT name, over_under,number,FanDuel,DraftKings,theScore_Bet   
-            FROM lines l
-            LEFT JOIN players USING (player_id)
-            WHERE date = '{}' '''.format(date), etl.conn)
-        else:
-            odf = od.latest_odds(MODEL_NAME, date)
-            if odf.empty:
-                return pd.DataFrame()
-        df = od.bet_table(preds, odf)
-        if not test:
-            etl.insert_data(df.assign(date=date, market=MODEL_NAME).reindex(columns=[c[1] for c in etl.conn.execute('pragma table_info(lines)')]), 'lines', sort=True)  # a book with no posted lines still gets its column
-        amts = [col for col in df.columns if re.search('Amount$', col) != None]
-        final = df[(df[amts]>value).any(axis=1)]
-        return final
-
-
-    @st.cache_data(ttl=300)
-    def load_current_plays(user, date):
-        """Load bets already placed today so they drop off the active list."""
-        query = """
-            SELECT CAST(player_id AS INTEGER) AS player_id, over_under, number
-            FROM bets
-            WHERE date = ?
-            AND user = ?
-            AND bet_amount is not Null
-        """
-        df = pd.read_sql(query, etl.conn, params=[date, user])
-        return df
-
-
-
-    # ── Line refresh: one manual snapshot of every game, then the table reads from it ──
-    if not test_mode and st.sidebar.button('Refresh Lines'):
-        with st.spinner('Pulling lines...'):
-            snap = od.pull_snapshot('manual')
-        create_todays_bets.clear()
-        st.sidebar.success('Pulled {} games'.format(snap.event_id.nunique() if not snap.empty else 0))
-
-    # ── Display predictions and bet recording form ──
-    if test_mode:
-        plays = create_todays_bets(MODEL_NAME,date=str(test_date), test=True,bankroll=bankroll)
+@st.cache_data(ttl=300)
+def create_todays_bets(MODEL_NAME,date=None,value=0,test=False,bankroll=1000):
+    """
+    This will go through the process of running the model
+    """
+    od.budget = bankroll
+    date = date or dt.datetime.today().strftime('%Y-%m-%d')
+    wide = get_preds(MODEL_NAME,date,pivot=True)
+    preds = od.oddsTable(wide)
+    if test:
+        odf = pd.read_sql('''SELECT name, over_under,number,FanDuel,DraftKings,theScore_Bet   
+        FROM lines l
+        LEFT JOIN players USING (player_id)
+        WHERE date = '{}' '''.format(date), etl.conn)
     else:
-        plays = create_todays_bets(MODEL_NAME,bankroll=bankroll)
+        odf = od.latest_odds(MODEL_NAME, date)
+        if odf.empty:
+            return pd.DataFrame()
+    df = od.bet_table(preds, odf)
+    if not test:
+        etl.insert_data(df.assign(date=date, market=MODEL_NAME).reindex(columns=[c[1] for c in etl.conn.execute('pragma table_info(lines)')]), 'lines', sort=True)  # a book with no posted lines still gets its column
+    amts = [col for col in df.columns if re.search('Amount$', col) != None]
+    final = df[(df[amts]>value).any(axis=1)]
+    return final
 
-    games = pd.read_sql("""
-        SELECT GROUP_CONCAT(teamAbrv) as teams,
-               MAX(CASE WHEN t.home = 0 THEN tms.teamAbrv END) || ' @ ' ||
-               MAX(CASE WHEN t.home = 1 THEN tms.teamAbrv END) AS game_label
-        FROM teamLog t
-        LEFT JOIN teams tms USING (team_id)
-        WHERE t.game_date = ?
-        GROUP BY t.game_id
-    """, etl.conn, params=[run_date])
+
+@st.cache_data(ttl=300)
+def load_current_plays(user, date):
+    """Load bets already placed today so they drop off the active list."""
+    query = """
+        SELECT CAST(player_id AS INTEGER) AS player_id, over_under, number
+        FROM bets
+        WHERE date = ?
+        AND user = ?
+        AND bet_amount is not Null
+    """
+    df = pd.read_sql(query, etl.conn, params=[date, user])
+    return df
+
+
+
+# ── Line refresh: one manual snapshot of every game, then the table reads from it ──
+if not test_mode and st.sidebar.button('Refresh Lines'):
+    with st.spinner('Pulling lines...'):
+        snap = od.pull_snapshot('manual')
+    create_todays_bets.clear()
+    st.sidebar.success('Pulled {} games'.format(snap.event_id.nunique() if not snap.empty else 0))
+
+
+@st.cache_data
+def run_game_leaders(game_filter, special_market):
+    df = special_market[special_market['team'].isin(game_filter.split(' @ '))]
+    return od.game_leaders(df)
+
+
+@st.fragment
+def bets_section(plays, games):
+    '''The bets table, filters and save form. A fragment: its widgets rerun only this function, not the other tabs.'''
     edited = None
     if not plays.empty and 'as_of' in plays.columns and plays.as_of.notna().any():
         st.caption('Prices as of {:%I:%M %p} (oldest game: {:%I:%M %p})'.format(plays.as_of.max(), plays.as_of.min()))
@@ -312,6 +293,11 @@ with bets_tab:
                         load_bankroll.clear()
                         st.session_state['saved_msg'] = 'Saved {} bet{}'.format(len(save_df), '' if len(save_df) == 1 else 's')
                         st.rerun()
+
+
+@st.fragment
+def special_markets(games):
+    '''Game leader, make-X and H2H calculators. A fragment, like bets_section.'''
     ## special markets
     st.divider()
     st.header('Special Markets')
@@ -319,13 +305,8 @@ with bets_tab:
     all_preds = get_preds(MODEL_NAME, run_date, pivot = True)
     if all_preds.empty:
         st.info('No predictions for {}.'.format(run_date))
-        st.stop()
+        return
     special_market = all_preds[all_preds['team'].isin(game_filter.split(' @ '))]
-
-    @st.cache_data
-    def run_game_leaders(game_filter, special_market):
-        df = special_market[special_market['team'].isin(game_filter.split(' @ '))]
-        return od.game_leaders(df)
 
     col1, col2, col3, col4 = st.columns(4)
     pred_val = col1.number_input('Predicted Odds', value=100)
@@ -364,3 +345,36 @@ with bets_tab:
 
 
 
+
+
+
+# ── Tabs: Bets, Player, Tracking, Query. Each tab is a fragment: a widget in one tab reruns only that tab. ──
+bets_tab, player_tab, tracking_tab, query_tab = st.tabs(['Bets', 'Player', 'Tracking', 'Query'])
+with player_tab:
+    player_view.render(run_date)
+with tracking_tab:
+    tracking_view.render(active_user, START_BANKROLL, KEEP_SHARE, SEASON_START)
+with query_tab:
+    query_view.render()
+
+with bets_tab:
+    st.title('Bets to Place')
+    if 'saved_msg' in st.session_state:
+        st.toast(st.session_state.pop('saved_msg'))
+    # ── Display predictions and bet recording form ──
+    if test_mode:
+        plays = create_todays_bets(MODEL_NAME,date=str(test_date), test=True,bankroll=bankroll)
+    else:
+        plays = create_todays_bets(MODEL_NAME,bankroll=bankroll)
+
+    games = pd.read_sql("""
+        SELECT GROUP_CONCAT(teamAbrv) as teams,
+               MAX(CASE WHEN t.home = 0 THEN tms.teamAbrv END) || ' @ ' ||
+               MAX(CASE WHEN t.home = 1 THEN tms.teamAbrv END) AS game_label
+        FROM teamLog t
+        LEFT JOIN teams tms USING (team_id)
+        WHERE t.game_date = ?
+        GROUP BY t.game_id
+    """, etl.conn, params=[run_date])
+    bets_section(plays, games)
+    special_markets(games)

@@ -194,6 +194,7 @@ def clv_heatmap(cells, cover, books):
     return alt.hconcat(*panels).resolve_scale(color='shared')
 
 
+@st.fragment  # its widgets rerun only this tab
 def render(user, start, keep, since):
     bets = settled_bets(user, since)
     if bets.empty:

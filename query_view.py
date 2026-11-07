@@ -45,6 +45,7 @@ def schema():
     return objs.assign(columns=objs.name.map(cols))
 
 
+@st.fragment  # its widgets rerun only this tab
 def render():
     st.caption('Read-only: writes are rejected. Queries stop after {}s; up to {:,} rows are shown.'.format(MAX_SECONDS, MAX_ROWS))
     with st.expander('Tables and columns'):
