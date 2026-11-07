@@ -22,6 +22,7 @@ BOOKS = ['FanDuel', 'DraftKings', 'theScore_Bet']
 WINDOWS = [5, 10, 30]
 EARLY_GAMES = 5          # players with 1-4 games this season are flagged (season-reset windows)
 ROLE_SHIFT_MIN = 6       # minutes shift vs last season that flags a role change
+BAR, EDGE, DOT = '#2a78d6', '#1b1b1b', '#eb6834'   # makes / bar outline / model dot
 
 
 def season_of(date):
@@ -131,6 +132,38 @@ def decimal(american):
     return 1 + american / 100 if american > 0 else 1 + 100 / abs(american)
 
 
+def pmf_chart(pmf, mean, last10):
+    '''Bars of P(threes = k), with the model mean and last-10 average written in the empty top-right corner.'''
+    df = pd.DataFrame({'k': pmf.index.astype(int), 'p': pmf.values})
+    bars = alt.Chart(df).mark_bar(color=BAR, cornerRadiusEnd=2).encode(
+        x=alt.X('k:O', title='Threes made', axis=alt.Axis(labelAngle=0)),
+        y=alt.Y('p:Q', title='P(threes = k)', axis=alt.Axis(format='.0%')),
+        tooltip=[alt.Tooltip('k:O', title='threes'), alt.Tooltip('p:Q', format='.1%', title='probability')])
+    corner = pd.DataFrame({'k': [df.k.max()]})
+    notes = [alt.Chart(corner).mark_text(align='right', baseline='top', fontSize=13, dx=12).encode(
+                 x='k:O', y=alt.value(y), text=alt.value(t))
+             for y, t in [(4, 'Model mean {:.2f}'.format(mean)), (22, 'Last 10 avg {:.2f}'.format(last10))]]
+    return alt.layer(bars, *notes).properties(height=260)
+
+
+def shots_chart(games, preds):
+    '''Last 10 games, oldest first: outlined bar = threes attempted, filled bar = made, dot = model mean threes that day.'''
+    g = games[['game_date', 'opponent', 'fg3a', 'fg3m']].sort_values('game_date').copy()
+    g['game'] = g.game_date.str[5:] + ' ' + g.opponent.astype(str)
+    if not preds.empty:
+        mean = (preds.assign(w=preds.number * preds.model_prob).groupby('date').agg(w=('w', 'sum'), p=('model_prob', 'sum')))
+        g = g.merge((mean.w / mean.p).rename('pred').reset_index().rename(columns={'date': 'game_date'}), how='left', on='game_date')
+    else:
+        g['pred'] = np.nan
+    x = alt.X('game:O', sort=g.game.tolist(), title=None, axis=alt.Axis(labelAngle=-35))
+    tip = ['game', alt.Tooltip('fg3a:Q', title='3PA'), alt.Tooltip('fg3m:Q', title='3PM'), alt.Tooltip('pred:Q', format='.2f', title='model mean')]
+    base = alt.Chart(g).encode(x=x, tooltip=tip)
+    attempts = base.mark_bar(fill='white', stroke=EDGE, strokeWidth=1.2).encode(y=alt.Y('fg3a:Q', title='Threes'))
+    made = base.mark_bar(fill=BAR, stroke=EDGE, strokeWidth=1.2).encode(y='fg3m:Q')
+    dot = alt.Chart(g[g.pred.notna()]).mark_point(filled=True, size=90, color=DOT, opacity=1).encode(x=x, y='pred:Q', tooltip=tip)
+    return alt.layer(attempts, made, dot).properties(height=260)
+
+
 def render(date):
     '''Draws the player tab for a date (YYYY-MM-DD). Returns early instead of st.stop(), which would halt the whole app.'''
     playing = teams_playing(date)
@@ -171,7 +204,7 @@ def render(date):
     for f in flags:
         st.warning(f)
 
-    # ── Recent threes: trend windows next to the game log ──
+    # ── Recent threes (game log or rolling windows) next to today's distribution ──
     st.subheader('Recent threes')
     rows = [window_summary(log, n) for n in WINDOWS]
     rows.append(dict(window_summary(this_season, len(this_season)) or {}, window='This season') if len(this_season) else None)
@@ -180,24 +213,24 @@ def render(date):
     gl = log.head(10).copy()
     gl['3P%'] = gl.fg3m / gl.fg3a.replace(0, np.nan)
     gl = gl.rename(columns={'fg3m': '3PM', 'fg3a': '3PA', 'min': 'MIN', 'game_date': 'date', 'opponent': 'opp'})
-    c1, c2 = st.columns([5, 6])
-    c1.dataframe(trend.style.format({'3PM': '{:.2f}', '3PA': '{:.2f}', '3P%': '{:.1%}', 'MIN': '{:.1f}', '3PA per 36': '{:.2f}'}),
-                 hide_index=True, width='content')
-    c2.dataframe(gl[['date', 'opp', 'MIN', '3PM', '3PA', '3P%']].style.format({'MIN': '{:.1f}', '3P%': '{:.0%}'}, na_rep='-'),
-                 hide_index=True, width='content')
-
-    # ── Today's prediction ──
-    st.subheader('Prediction for {}'.format(date))
     pt = predictions(pid, date, date)
+    c1, c2 = st.columns([6, 5])
+    view = c1.radio('Recent threes view', ['Game log', 'Rolling windows'], horizontal=True, key='player_tab_recent', label_visibility='collapsed')
+    if view == 'Game log':
+        c1.dataframe(gl[['date', 'opp', 'MIN', '3PM', '3PA', '3P%']].style.format({'MIN': '{:.1f}', '3P%': '{:.0%}'}, na_rep='-'),
+                     hide_index=True, width='content')
+    else:
+        c1.dataframe(trend.style.format({'3PM': '{:.2f}', '3PA': '{:.2f}', '3P%': '{:.1%}', 'MIN': '{:.1f}', '3PA per 36': '{:.2f}'}),
+                     hide_index=True, width='content')
     if pt.empty:
-        st.info('No prediction for {} on {} (not eligible or no game).'.format(name, date))
+        c2.info('No prediction for {} on {} (not eligible or no game).'.format(name, date))
     else:
         pmf = pt.groupby('number').model_prob.sum()
         pmf = pmf / pmf.sum()
-        c1, c2 = st.columns([1, 2])
-        c1.metric('Model mean threes', '{:.2f}'.format((pmf.index.values * pmf.values).sum()))
-        c1.metric('Last 10 average', '{:.2f}'.format(log.head(10).fg3m.mean()))
-        c2.bar_chart(pmf.rename('P(threes = k)'))
+        c2.altair_chart(pmf_chart(pmf, (pmf.index.values * pmf.values).sum(), log.head(10).fg3m.mean()), width='stretch')
+
+        # ── Today's prediction: fair odds vs the books ──
+        st.subheader('Prediction for {}'.format(date))
         ladder = []
         for n in np.arange(0.5, pmf.index.max(), 1.0):
             p_over = pmf[pmf.index > n].sum()
@@ -216,6 +249,14 @@ def render(date):
         fmt = {'P(over)': '{:.1%}', 'P(under)': '{:.1%}', 'EV over': '{:+.1%}', 'EV under': '{:+.1%}', 'line': '{:.1f}'}
         st.dataframe(ladder.style.format(fmt, na_rep='-'), hide_index=True, width='content')
         st.caption('EV uses the raw model probability against the best stored price; claimed edges run 2-4x the realized ones.')
+
+    # ── Attempts, makes and the model's prediction, last 10 games ──
+    st.subheader('Attempts, makes and prediction')
+    last10 = log.head(10)
+    hist = predictions(pid, last10.game_date.min(), last10.game_date.max())
+    st.altair_chart(shots_chart(last10, hist), width='stretch')
+    st.caption("Outlined bar = threes attempted, filled = made, dot = the model's mean threes for that game (the day's last run). "
+               'Games with no stored prediction have no dot.')
 
     # ── Line movement by book, last 10 games ──
     st.subheader('Line movement by book')
