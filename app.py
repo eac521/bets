@@ -24,6 +24,7 @@ from betting import funcs
 from betting.constants import books as BOOK_META
 import player_view
 import tracking_view
+import query_view
 od = funcs.odds()
 
 
@@ -84,12 +85,14 @@ else:
                          column_config={'Amount': st.column_config.NumberColumn(format='$%.2f')}, hide_index=True)
 
 
-# ── Tabs: Bets, Player, Tracking. Player and Tracking are drawn first, so a st.stop() in the bets tab can't blank them. ──
-bets_tab, player_tab, tracking_tab = st.tabs(['Bets', 'Player', 'Tracking'])
+# ── Tabs: Bets, Player, Tracking, Query. The others are drawn first, so a st.stop() in the bets tab can't blank them. ──
+bets_tab, player_tab, tracking_tab, query_tab = st.tabs(['Bets', 'Player', 'Tracking', 'Query'])
 with player_tab:
     player_view.render(run_date)
 with tracking_tab:
     tracking_view.render(active_user, START_BANKROLL, KEEP_SHARE, SEASON_START)
+with query_tab:
+    query_view.render()
 
 with bets_tab:
     # ── Dashboard ──
