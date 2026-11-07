@@ -204,12 +204,14 @@ class odds():
                                  [df.bet_amount * mult * (1 + df.boost.fillna(0)), np.where(df.free_bet.fillna(0) == 1, 0.0, -df.bet_amount)], 0.0)  # boost = profit boost; a free bet's stake isn't ours
         return df
 
-    def current_bankroll(self, conn, user, start=1000, keep=.8, since='2026-10-01'):
+    def current_bankroll(self, conn, user, start=1000, keep=.8, since='2026-10-01', today=None):
         '''
         Daily Kelly bankroll: starting bankroll + settled P&L, minus 20% of each new profit high set aside.
         Losses count in full; set-aside money never comes back (a high-water skim, like withdrawing it).
-        Inputs: sqlite connection, user, starting bankroll, share of profits kept in the bankroll, season start date
-        Output: dict with bankroll, pnl (model plays), other (live / H2H / parlays from bankroll_adjustments), set_aside, pending
+        Inputs: sqlite connection, user, starting bankroll, share of profits kept in the bankroll, season start date,
+                today (YYYY-MM-DD) for the pending table
+        Output: dict with bankroll, pnl (model plays), other (live / H2H / parlays from bankroll_adjustments), set_aside, pending,
+                pending_today (today's pending bets by book: book, bets, amount)
         '''
         df = self.settle_bets(conn, user, since)
         model = df[df.status.isin(['win', 'loss'])].groupby('date').profit.sum()
@@ -220,7 +222,9 @@ class odds():
         total = cum.iloc[-1] if len(cum) else 0.0
         set_aside = (1 - keep) * max(cum.max(), 0) if len(cum) else 0.0
         return {'bankroll': round(start + total - set_aside, 2), 'pnl': round(model.sum(), 2), 'other': round(adj.sum(), 2),
-                'set_aside': round(set_aside, 2), 'pending': int((df.status == 'pending').sum())}
+                'set_aside': round(set_aside, 2), 'pending': int((df.status == 'pending').sum()),
+                'pending_today': df[(df.status == 'pending') & (df.date == today)].groupby('bet_book')
+                    .agg(bets=('bet_amount', 'size'), amount=('bet_amount', 'sum')).reset_index().rename(columns={'bet_book': 'book'})}
 
     def kellyCrit(self,prob,odds,show=True):
         '''

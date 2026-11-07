@@ -1,5 +1,10 @@
 # Changelog
 ## Unreleased
+- Bets tab: the editor and Save Bets sit in a form, so ticks and wagers don't rerun the app until Save; a "Saved N bets" toast confirms the save; rows with no main-book price or a $0 wager are dropped
+- Refresh Data (Override) clears every cached query after the data pull
+- Sidebar: pending table for today's bets by book (bets, amount, total), updated on save; P&L / other / set-aside caption removed
+- Player tab: one table that switches between the last-10 game log and the rolling windows, with the prediction distribution beside it (model mean and last-10 average in the corner); new last-10 chart of attempts (outlined), makes (filled) and the model's mean threes (dot)
+- Tracking tab: book filter for the whole tab (other P&L only with every book selected); daily P&L with cumulative P&L on a right axis, zeros aligned (bankroll chart removed); CLV split into overs and unders, price buckets down and books across, every bet book shown with matched / placed counts
 - Historical odds backfill (`nba/NBAodds.py`; books include the Kalshi and Novig exchanges and BetRivers): The Odds API historical events and event-odds endpoints into parquet by season / pull_sequence, with an events manifest, resumable task table, credit floor and per-run cap, open-line search, Pikkit bet-time snapshots, player/team alias tables, pilot report and live-lines comparison
 - `--extra`: first basket, first team basket and Q1 points into `nba/data/odds_hist_extra/`, reusing the core run's events and open times; markets the API rejects are dropped before the run
 - Tests for the backfill helpers (`tests/test_odds_hist.py`)

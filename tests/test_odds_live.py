@@ -181,7 +181,16 @@ def test_scheduled_rows_stay_pending(conn):
 def test_bankroll_sets_aside_share_of_profit_high(od, conn):
     # day 1: +3 (peak) -> 0.6 set aside; day 2: -20 -> cum -17
     br = od.current_bankroll(conn, 'EAC', start=1000, keep=.8, since='2026-10-01')
+    assert br.pop('pending_today').empty  # no date given: no pending table
     assert br == {'bankroll': 982.4, 'pnl': -17.0, 'other': 0.0, 'set_aside': 0.6, 'pending': 1}
+
+
+def test_pending_today_by_book(od, conn):
+    conn.execute("INSERT INTO bets VALUES (2, '2026-10-23', 'threes', 'Under', 2.5, 'DraftKings', 150, 7.5, 'EAC', 0, 0)")
+    conn.execute("INSERT INTO bets VALUES (3, '2026-10-23', 'threes', 'Over', 0.5, 'FanDuel', -150, 4, 'EAC', 0, 0)")
+    pt = od.current_bankroll(conn, 'EAC', since='2026-10-01', today='2026-10-23')['pending_today']
+    assert pt.to_dict('records') == [{'book': 'DraftKings', 'bets': 2, 'amount': 17.5}, {'book': 'FanDuel', 'bets': 1, 'amount': 4.0}]
+    assert od.current_bankroll(conn, 'EAC', since='2026-10-01', today='2026-10-22')['pending_today'].empty  # settled days drop out
 
 
 def test_bankroll_losses_count_in_full_below_start(od, conn):
