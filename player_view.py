@@ -164,6 +164,7 @@ def shots_chart(games, preds):
     return alt.layer(attempts, made, dot).properties(height=260)
 
 
+@st.fragment  # its widgets rerun only this tab
 def render(date):
     '''Draws the player tab for a date (YYYY-MM-DD). Returns early instead of st.stop(), which would halt the whole app.'''
     playing = teams_playing(date)
