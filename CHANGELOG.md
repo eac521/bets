@@ -1,5 +1,7 @@
 # Changelog
 ## Unreleased
+- `derive_tables`: drop, rebuild and indexes for each derived table run in one transaction, so the app keeps reading the old `pgames` (and `team_def`, `opp_data`) until the new one is done, and a failed rebuild keeps the old table (`tests/test_derive.py`)
+- `settle_bets`: joins `plyrLogs` on plain `player_id` / `game_date` (both TEXT, YYYY-MM-DD) instead of `CAST` / `date()`, so it uses the `(player_id, game_date)` index: 9.3s to under 0.01s on the live database; the test `bets` table now uses the prod schema
 - Each tab is a fragment (`st.fragment`): a filter or widget reruns only its own tab, not the sidebar and the other three tabs; Special Markets is its own fragment too
 - Query tab: ad hoc SQL on `nba.db` through a read-only connection (`mode=ro` + `query_only`), one statement per run, 30s limit, first 10,000 rows shown, CSV download, table/column reference
 - Bets tab: the editor and Save Bets sit in a form, so ticks and wagers don't rerun the app until Save; a "Saved N bets" toast confirms the save; rows with no main-book price or a $0 wager are dropped

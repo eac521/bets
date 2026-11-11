@@ -136,7 +136,8 @@ def test_pull_open_skips_when_today_has_one(od, monkeypatch):
 @pytest.fixture
 def conn():
     c = sqlite3.connect(':memory:')
-    c.execute('CREATE TABLE bets (player_id, date, market, over_under, number, bet_book, final_line, bet_amount, user, boost REAL DEFAULT 0, free_bet INTEGER DEFAULT 0)')
+    c.execute('CREATE TABLE bets (player_id TEXT, date TEXT, market TEXT, over_under TEXT, number REAL, bet_book TEXT, final_line REAL, '
+              'bet_amount REAL, user TEXT, boost REAL DEFAULT 0, free_bet INTEGER DEFAULT 0)')  # prod schema (migrate_bets_v2.sql)
     c.execute('CREATE TABLE plyrLogs (player_id TEXT, game_date TEXT, min FLOAT, lc_fgm INT, rc_fgm INT, abv_fgm INT)')
     c.executemany('INSERT INTO plyrLogs VALUES (?,?,?,?,?,?)', [
         ('1', '2026-10-21', 30, 1, 0, 2),   # 3 threes

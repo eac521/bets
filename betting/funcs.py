@@ -191,8 +191,8 @@ class odds():
                    pl.min, COALESCE(pl.lc_fgm,0) + COALESCE(pl.rc_fgm,0) + COALESCE(pl.abv_fgm,0) AS made,
                    ld.d AS loaded
             FROM bets b
-            LEFT JOIN plyrLogs pl ON CAST(pl.player_id AS INTEGER) = CAST(b.player_id AS INTEGER) AND date(pl.game_date) = b.date
-            LEFT JOIN (SELECT DISTINCT date(game_date) AS d FROM plyrLogs WHERE date(game_date) >= ? AND min > 0) ld ON ld.d = b.date
+            LEFT JOIN plyrLogs pl ON pl.player_id = b.player_id AND pl.game_date = b.date  -- both TEXT, YYYY-MM-DD: uses idx_plyrLogs_player_game
+            LEFT JOIN (SELECT DISTINCT game_date AS d FROM plyrLogs WHERE game_date >= ? AND min > 0) ld ON ld.d = b.date
             WHERE b.user = ? AND b.market = 'threes' AND b.date >= ? AND b.bet_amount IS NOT NULL
         ''', conn, params=[since, user, since])
         played = df['min'].fillna(0) > 0

@@ -233,12 +233,18 @@ class data(base):
             except Exception:
                 pre_count = 0
             logger.info("derive {}: {} has {} rows".format(table_name,table_name, pre_count))
-            self.cur.execute("DROP TABLE IF EXISTS {}".format(table_name))
             with open(derived_tables.get(table_name).get('file')) as f:
-                self.cur.executescript(f.read())
-            for idx_name, idx_cols in derived_tables.get(table_name).get('indexes'):
-                self.cur.execute("CREATE INDEX IF NOT EXISTS {} ON {}({})".format(idx_name, table_name, idx_cols))
-            self.conn.commit()
+                sql = f.read()
+            idx = ''.join('CREATE INDEX IF NOT EXISTS {} ON {}({});\n'.format(n, table_name, cols)
+                          for n, cols in derived_tables.get(table_name).get('indexes'))
+            # One transaction: readers (the app) keep seeing the old table until COMMIT, and a failed rebuild
+            # rolls back to it instead of leaving the table missing. The lone ';' ends a script without one.
+            try:
+                self.cur.executescript('BEGIN;\nDROP TABLE IF EXISTS {t};\n{sql}\n;\n{idx}COMMIT;'.format(t=table_name, sql=sql, idx=idx))
+            except Exception:
+                self.conn.rollback()  # executescript leaves the transaction open on error
+                logger.exception('derive {}: rebuild failed, kept the previous table'.format(table_name))
+                raise
             post_count = pd.read_sql("SELECT COUNT(*) as ct FROM {}".format(table_name), self.conn).iloc[0, 0]
             logger.info("derive {}: {} materialized with {} rows".format(table_name,table_name,post_count))
 
