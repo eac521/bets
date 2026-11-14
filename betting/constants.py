@@ -25,3 +25,8 @@ live_markets = [
     'player_points_rebounds_assists', 'player_points_rebounds_assists_alternate',
     'player_first_basket', 'player_first_team_basket', 'player_points_q1',
 ]
+
+# Chart colors by book (app column name); any other book is grey. Stoplight = bad -> middle -> good (CLV heatmap).
+BOOK_COLORS = {'FanDuel': '#2B6CB0', 'DraftKings': '#38A169', 'Fanatics': '#C53030', 'BetMGM': '#B4975A', 'Total': '#2D2A28'}
+OTHER_BOOK_COLOR = '#8A8580'
+STOPLIGHT = ['#C53030', '#F6AD55', '#F2C94C', '#9AE6B4', '#38A169']

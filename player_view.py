@@ -1,7 +1,7 @@
 """
 Player tab: pick a team, then a player from its roster. Recent threes (trend windows next to the game log),
-the day's prediction vs the books, and each primary book's line movement over his last 10 games (threes or points).
-Rendered by app.py as its second tab: player_view.render(date).
+the day's prediction vs the books, this season's bets on him, and each primary book's line movement over his
+last 10 games (threes or points). Rendered by app.py: player_view.render(date, user, since).
 """
 import datetime as dt
 import altair as alt
@@ -11,8 +11,10 @@ import streamlit as st
 
 from nba import NBAbase
 from betting import market as mk
+from betting.constants import BOOK_COLORS, OTHER_BOOK_COLOR
 from betting.funcs import odds
 from nba_api.stats.static import teams as nba_teams
+import tracking_view
 
 db = NBAbase.base()
 od = odds()
@@ -164,8 +166,39 @@ def shots_chart(games, preds):
     return alt.layer(attempts, made, dot).properties(height=260)
 
 
+def bets_on_player(pid, name, user, since):
+    '''This season's threes bets on one player: totals, a by-side summary with model-expected wins, and the bet list.'''
+    st.subheader('Bets on {} this season'.format(name))
+    b = tracking_view.settled_bets(user, since)
+    b = b[b.player_id == str(pid)] if not b.empty else b
+    if b.empty:
+        st.info('No bets logged on this player since {}.'.format(since))
+        return
+    done = b[b.status.isin(['win', 'loss'])].assign(won=lambda d: (d.status == 'win').astype(int))
+    c = st.columns(4)
+    c[0].metric('Bets', len(b), '{} pending'.format(int((b.status == 'pending').sum())) if (b.status == 'pending').any() else None, delta_color='off')
+    c[1].metric('Staked (settled)', '${:,.2f}'.format(done.bet_amount.sum()))
+    c[2].metric('P&L', '${:+,.2f}'.format(done.profit.sum()))
+    c[3].metric('ROI', '{:+.1%}'.format(done.profit.sum() / done.bet_amount.sum()) if done.bet_amount.sum() else '-')
+    if not done.empty:
+        side = done.groupby('over_under').agg(bets=('won', 'size'), wins=('won', 'sum'), expected=('p_model', 'sum'),
+                                              staked=('bet_amount', 'sum'), profit=('profit', 'sum')).reset_index()
+        side['roi'] = side.profit / side.staked
+        st.dataframe(side.rename(columns={'over_under': 'side', 'expected': 'model-expected wins', 'profit': 'P&L'}).style.format(
+            {'model-expected wins': '{:.1f}', 'staked': '${:,.2f}', 'P&L': '${:+,.2f}', 'roi': '{:+.1%}'}, na_rep='-'), hide_index=True, width='content')
+    with st.expander('Every bet'):
+        show = b.sort_values(['date', 'number'], ascending=[False, True])[
+            ['date', 'over_under', 'number', 'bet_book', 'final_line', 'bet_amount', 'made', 'status', 'profit']]
+        show.loc[show.status.isin(['pending', 'void']), 'made'] = np.nan
+        st.dataframe(show.rename(columns={'over_under': 'side', 'number': 'line', 'bet_book': 'book', 'final_line': 'price',
+                                          'bet_amount': 'stake', 'made': '3PM', 'profit': 'P&L'}).style.format(
+            {'line': '{:.1f}', 'price': '{:+.0f}', 'stake': '${:.2f}', '3PM': '{:.0f}', 'P&L': '${:+.2f}'}, na_rep='-'), hide_index=True, width='content')
+    st.caption('A handful of bets on one player, often several lines on the same night, is mostly luck: read wins against the '
+               "model-expected wins, not as a verdict on the player.")
+
+
 @st.fragment  # its widgets rerun only this tab
-def render(date):
+def render(date, user=None, since=None):
     '''Draws the player tab for a date (YYYY-MM-DD). Returns early instead of st.stop(), which would halt the whole app.'''
     playing = teams_playing(date)
     team_ids = sorted(TEAM_NAMES, key=lambda t: (t not in playing, TEAM_NAMES[t]))  # teams playing that day first
@@ -259,6 +292,10 @@ def render(date):
     st.caption("Outlined bar = threes attempted, filled = made, dot = the model's mean threes for that game (the day's last run). "
                'Games with no stored prediction have no dot.')
 
+    # ── This season's bets on him ──
+    if user and since:
+        bets_on_player(pid, name, user, since)
+
     # ── Line movement by book, last 10 games ──
     st.subheader('Line movement by book')
     mkt = st.radio('Market', list(MARKETS), horizontal=True, key='player_tab_market')
@@ -282,7 +319,8 @@ def render(date):
     ytitle = 'Implied mean threes (close)' if mkt == 'Threes' else 'Points line (close)'
     lines = alt.Chart(close).mark_line(point=True, strokeWidth=2).encode(
         x=alt.X('game_date:O', title=None), y=alt.Y('{}:Q'.format(y), title=ytitle),
-        color=alt.Color('book:N', title='Book'),
+        color=alt.Color('book:N', title='Book', scale=alt.Scale(domain=sorted(close.book.unique()),
+                                                            range=[BOOK_COLORS.get(b, OTHER_BOOK_COLOR) for b in sorted(close.book.unique())])),
         tooltip=['game_date', 'book', alt.Tooltip('line:Q'), alt.Tooltip('p_over:Q', format='.0%', title='P(over)'),
                  alt.Tooltip('implied_mean:Q', format='.2f')])
     actual = alt.Chart(games[games.game_date.isin(close.game_date)]).mark_point(filled=True, size=70, color='#555').encode(

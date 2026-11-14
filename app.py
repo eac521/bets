@@ -24,6 +24,7 @@ from betting import funcs
 from betting.constants import books as BOOK_META
 import player_view
 import tracking_view
+import parlay_view
 import query_view
 od = funcs.odds()
 
@@ -191,42 +192,33 @@ def bets_section(plays, games):
             with col_f2:
                 team_filter = st.selectbox('Team', ['All'] + sorted(predictions['team'].unique().tolist()))
             prim = [b for b in PRIMARY if b in filtered.columns]
-            sec = [b for b in SECONDARY if b in filtered.columns]
+            book_cols = [b for b in BOOKS if b in filtered.columns]
             best_price = filtered[prim].max(axis=1)
-            filtered['best_book'] = filtered[prim].fillna(-100000).idxmax(axis=1).where(best_price.notna())
-            beats = filtered[sec].gt(best_price.fillna(-100000), axis=0)
-            filtered['beats'] = [', '.join(b for b, v in zip(sec, row) if v) for row in beats.values]
-            best_book_filter = st.selectbox('Best Book', ['All'] + PRIMARY)
-            odds_range = st.slider('Odds Range', min_value=-1000, max_value=1000, value=(-200, 200), step=50)
-            if best_book_filter != 'All':
-                filtered = filtered[filtered['best_book'] == best_book_filter]
+            best_book = filtered[prim].fillna(-100000).idxmax(axis=1).where(best_price.notna())
+            book_filter = st.selectbox('Book', ['All'] + book_cols)
+            odds_range = st.slider('Odds Range', min_value=-1000, max_value=2000, value=(-200, 1000), step=50)
             if team_filter != 'All':
                 filtered = filtered[filtered['team'] == team_filter]
 
-            book_cols = [b for b in BOOKS if b in filtered.columns]
-            filtered = filtered[
-                filtered[book_cols].apply(
-                    lambda row: row.between(odds_range[0], odds_range[1]).any(), axis=1
-                ).astype(bool)  # an empty result must stay a row mask, not a column list
-            ]
-
-            # Add columns for bet recording
-
+            # Each row is priced at one book: the chosen book, or the best primary book when no book is chosen
             filtered.insert(0, 'bet', False)
-            filtered['book'] = filtered['best_book'].fillna('None')
-            best_amt = pd.Series(float('nan'), index=filtered.index)
-            for b in prim:
-                best_amt = best_amt.mask(filtered['best_book'] == b, filtered['{}Amount'.format(PREFIX[b])])
-            filtered['wager'] =  (best_amt.clip(lower=0) / 0.25).round() * 0.25
-            best_ev = pd.Series(float('nan'), index=filtered.index)
-            for b in prim:
-                best_ev = best_ev.mask(filtered['best_book'] == b, filtered['{}EV'.format(PREFIX[b])])
-            filtered['ev'] = best_ev
             filtered['line'] = best_price
+            filtered['book'] = book_filter if book_filter != 'All' else best_book.fillna('None')
+            book_price, book_amt, book_ev = (pd.Series(float('nan'), index=filtered.index) for _ in range(3))
+            for b in book_cols:
+                at_book = filtered['book'] == b
+                book_price = book_price.mask(at_book, filtered[b])
+                book_amt = book_amt.mask(at_book, filtered['{}Amount'.format(PREFIX[b])])
+                book_ev = book_ev.mask(at_book, filtered['{}EV'.format(PREFIX[b])])
+            filtered['book_price'] = book_price
+            filtered['wager'] = (book_amt.clip(lower=0) / 0.25).round() * 0.25
+            filtered['ev'] = book_ev
             filtered['price'] = float('nan')  # price actually taken; blank = the chosen book's line
             filtered['boost'] = 0.0  # profit boost %, e.g. 25 for a 25% boost
             filtered['free_bet'] = False
-            filtered = filtered[filtered['wager'] > 0]  # no main-book price (Fanatics-only lines) or a $0 Kelly wager
+            filtered = filtered[filtered['book_price'].between(odds_range[0], odds_range[1])]  # the price the wager is sized on
+            filtered = filtered[filtered['wager'] > 0]  # no price at this book or a $0 Kelly wager
+            shown_price = ['book_price'] if book_filter != 'All' else []  # with a book chosen, its price sits next to the best price
 
             if filtered.empty:
                 st.success('No open bets with a positive wager (filters applied).')
@@ -237,19 +229,18 @@ def bets_section(plays, games):
                     ev_config.update({col: st.column_config.NumberColumn(col, format='dollar') for col in filtered.columns if col.endswith('Amount')})
                     edited = st.data_editor(
                         filtered,
-                        column_order=['bet', 'name', 'team', 'over_under', 'number', 'held', 'model_line', 'line', 'best_book', 'ev', 'beats',
-                                      'book', 'price', 'boost', 'free_bet', 'wager'],  # everything else stays in the frame, hidden
-                        disabled=['name', 'team', 'over_under', 'number', 'held', 'model_line', 'line', 'best_book', 'ev', 'beats'],
+                        column_order=['bet', 'name', 'team', 'over_under', 'number', 'held', 'model_line'] + shown_price + ['line', 'wager', 'ev',
+                                      'book', 'price', 'boost', 'free_bet'],  # everything else stays in the frame, hidden
+                        disabled=['name', 'team', 'over_under', 'number', 'held', 'model_line', 'book_price', 'line', 'ev'],
                         column_config={
                             'bet': st.column_config.CheckboxColumn('Bet?'),
                             'over_under': st.column_config.TextColumn('O/U'),
                             'number': st.column_config.NumberColumn('Line', format='%.1f'),
                             'held': st.column_config.TextColumn('Held', help='Lines already bet on this player today'),
                             'model_line': st.column_config.NumberColumn('Model', format='%d'),
-                            'line': st.column_config.NumberColumn('Best', format='%d'),
-                            'best_book': st.column_config.TextColumn('Best book'),
+                            'book_price': st.column_config.NumberColumn(book_filter, format='%d', help='Price at the chosen book: wager and EV use it'),
+                            'line': st.column_config.NumberColumn('Best', format='%d', help='Best price across FanDuel, DraftKings and BetMGM'),
                             'ev': st.column_config.NumberColumn('EV', format='percent'),
-                            'beats': st.column_config.TextColumn('Beats best', help='Secondary book with a better price than the best primary book'),
                             'book': st.column_config.SelectboxColumn('Book', options=BOOKS + ['None']),
                             'price': st.column_config.NumberColumn('Price taken', help="Blank = the chosen book's line", format='%d', step=1),
                             'boost': st.column_config.NumberColumn('Boost %', min_value=0, max_value=100, step=5, format='%d%%'),
@@ -331,6 +322,38 @@ def special_markets(games):
         col2.subheader('Make X Threes')
         col2.dataframe(makeX.style.format({'Prob': '{:.1%}'}))
 
+        st.subheader('Combined / Either')
+        nums = sorted(c for c in special_market.columns if isinstance(c, (int, float)))
+        pool = special_market[~special_market['name'].isin(excluded)].copy()
+        pmfs = pool[nums].fillna(0)
+        pool['exp'] = (pmfs * nums).sum(axis=1) / pmfs.sum(axis=1)
+        pool = pool.nlargest(8, 'exp').set_index('player_id')  # the 8 highest expected makes in the game
+        if len(pool) < 2:
+            st.info('Fewer than two predicted players in this game.')
+        else:
+            label = lambda pid: '{} ({}, {:.1f})'.format(pool.loc[pid, 'name'], pool.loc[pid, 'team'], pool.loc[pid, 'exp'])
+            c1, c2, c3 = st.columns(3)
+            pa = c1.selectbox('Player A', pool.index.tolist(), index=0, format_func=label, key='combo_a')
+            pb = c2.selectbox('Player B', pool.index.tolist(), index=1, format_func=label, key='combo_b')
+            mode = c3.radio('Market', ['Combined', 'Either'], horizontal=True, key='combo_mode')
+            if pa == pb:
+                st.warning('Pick two different players.')
+            else:
+                either = mode == 'Either'
+                combo = od.combo_threes(pool.loc[pa, nums].fillna(0).values, pool.loc[pb, nums].fillna(0).values,
+                                        range(3, 8) if either else range(5, 10), either=either)
+                exp_total = pool.loc[pa, 'exp'] + pool.loc[pb, 'exp']
+                if not either:
+                    combo['vs expected'] = ['above' if int(m[:-1]) > exp_total else 'at or below' for m in combo.Makes]
+                st.dataframe(combo.drop(columns='Prob').style.format({'Fair odds': '{:+d}'}), hide_index=True, width='content')
+                if either:
+                    st.caption('Either = at least one of the two makes that many. Fair odds with the two players independent. '
+                               'Expected makes: {:.1f} and {:.1f}.'.format(pool.loc[pa, 'exp'], pool.loc[pb, 'exp']))
+                else:
+                    st.caption('Combined = the two players\' makes added together. Fair odds with the two players independent. '
+                               'Expected combined makes: {:.1f}. The model\'s distributions run narrow, so prices above the expected total '
+                               'come out too long (safe side) and prices at or below it too short (distrust those).'.format(exp_total))
+
     st.subheader('H2H')
 
     col1, col2 = st.columns(2)
@@ -348,10 +371,10 @@ def special_markets(games):
 
 
 
-# ── Tabs: Bets, Player, Tracking, Query. Each tab is a fragment: a widget in one tab reruns only that tab. ──
-bets_tab, player_tab, tracking_tab, query_tab = st.tabs(['Bets', 'Player', 'Tracking', 'Query'])
+# ── Tabs: Bets, Parlays, Player, Tracking, Query. Each tab is a fragment: a widget in one tab reruns only that tab. ──
+bets_tab, parlays_tab, player_tab, tracking_tab, query_tab = st.tabs(['Bets', 'Parlays', 'Player', 'Tracking', 'Query'])
 with player_tab:
-    player_view.render(run_date)
+    player_view.render(run_date, active_user, SEASON_START)
 with tracking_tab:
     tracking_view.render(active_user, START_BANKROLL, KEEP_SHARE, SEASON_START)
 with query_tab:
@@ -368,7 +391,7 @@ with bets_tab:
         plays = create_todays_bets(MODEL_NAME,bankroll=bankroll)
 
     games = pd.read_sql("""
-        SELECT GROUP_CONCAT(teamAbrv) as teams,
+        SELECT t.game_id, GROUP_CONCAT(teamAbrv) as teams,
                MAX(CASE WHEN t.home = 0 THEN tms.teamAbrv END) || ' @ ' ||
                MAX(CASE WHEN t.home = 1 THEN tms.teamAbrv END) AS game_label
         FROM teamLog t
@@ -378,3 +401,6 @@ with bets_tab:
     """, etl.conn, params=[run_date])
     bets_section(plays, games)
     special_markets(games)
+
+with parlays_tab:
+    parlay_view.render(plays, games, get_preds(MODEL_NAME, run_date, pivot=True), od, active_user, run_date, BOOKS)

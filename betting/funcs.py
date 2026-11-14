@@ -7,6 +7,7 @@ import logging
 import pandas as pd
 import numpy as np
 import datetime as dt
+import uuid
 from zoneinfo import ZoneInfo
 from itertools import combinations
 
@@ -32,6 +33,7 @@ class odds():
         self.unit = self.budget * .01
         self.base_url = 'https://api.the-odds-api.com/v4/sports/{sport}/events/{{}}/odds?apiKey={{}}&regions=us&markets={markets}&dateFormat=iso&oddsFormat=american&bookmakers={books}'
         self.liveDir = os.environ.get('ODDS_LIVE_DIR', os.path.join(os.path.dirname(__file__), '..', 'nba', 'data', 'odds_live'))
+        self.parlayDir = os.environ.get('PARLAY_DIR', os.path.join(os.path.dirname(__file__), '..', 'nba', 'data', 'parlays'))
         self.market_vars = {
             'threes': {
                 'sport':'basketball_nba',
@@ -403,6 +405,79 @@ class odds():
         makeX = makeX.to_frame(name='Prob')
         makeX['line'] = makeX['Prob'].apply(lambda x: odds.convertPercentToOdds(x))
         return gl,makeX
+
+    @staticmethod
+    def fair_odds(p):
+        '''American odds for a probability, rounded to the nearest whole price (capped at +/-9900).'''
+        p = min(max(float(p), .01), .99)
+        return int(round(-100 * p / (1 - p))) if p >= .5 else int(round(100 * (1 - p) / p))
+
+    @staticmethod
+    def combo_threes(pmf_a, pmf_b, thresholds, either=False):
+        '''
+        Two-player threes markets from the two PMFs, assuming the players are independent (exact, no simulation).
+        Combined: P(A + B >= n), from the convolution of the PMFs. Either: P(A >= n or B >= n) = 1 - P(A < n) * P(B < n).
+        Inputs: P(threes = k) for k = 0, 1, 2, ... for each player (array-like), thresholds n, either flag
+        Output: DataFrame with Makes ('n+'), Prob and Fair odds (American)
+        '''
+        a, b = np.asarray(pmf_a, dtype=float), np.asarray(pmf_b, dtype=float)
+        a, b = a / a.sum(), b / b.sum()
+        total = np.convolve(a, b)
+        prob = [1 - a[:n].sum() * b[:n].sum() if either else total[n:].sum() for n in thresholds]
+        return pd.DataFrame({'Makes': ['{}+'.format(n) for n in thresholds], 'Prob': prob,
+                             'Fair odds': [odds.fair_odds(p) for p in prob]})
+
+    @staticmethod
+    def parlay_prob(legs, pmfs):
+        '''
+        Joint probability that every leg wins. Legs on different players multiply (independence). Two or more legs on
+        the same player come from his PMF: the probability that his threes satisfy every one of those legs at once.
+        Inputs: legs DataFrame (player_id, over_under, number, model_prob); pmfs = {player_id: Series of P(threes = k) indexed by k}
+        Output: float
+        '''
+        joint = 1.0
+        for pid, g in legs.groupby('player_id'):
+            if len(g) == 1 or pid not in pmfs:
+                joint *= float(g.model_prob.prod())
+                continue
+            pmf = pmfs[pid].astype(float)
+            k = pmf.index.to_numpy(dtype=float)
+            ok = np.ones(len(k), dtype=bool)
+            for side, n in zip(g.over_under, g.number):
+                ok &= (k > n) if side == 'Over' else (k < n)
+            joint *= float(pmf.to_numpy()[ok].sum() / pmf.sum())
+        return joint
+
+    def save_parlay(self, legs, book, user, stake, price_taken, joint_model_p, kelly_suggested, now=None):
+        '''
+        Records a placed parlay as one new parquet file: {parlayDir}/{game_date}_{HHMMSS}_{id}.parquet, one row per leg
+        with the ticket fields repeated. Files are never rewritten. A record of what was bet and what the model thought;
+        results and P&L come from the Pikkit reconcile.
+        Inputs: legs DataFrame (game_id, game_date, player_id, name, over_under, number, leg_price, model_prob), book, user,
+                stake, American price taken, model joint probability, Kelly stake shown
+        Output: (parlay_id, file path)
+        '''
+        now = now or pd.Timestamp.now(tz=ET).floor('s')
+        parlay_id = str(uuid.uuid4())
+        out = pd.DataFrame({
+            'parlay_id': parlay_id, 'user': user, 'book': book, 'placed_at': now.tz_localize(None),
+            'stake': float(stake), 'price_taken': int(price_taken), 'joint_model_p': float(joint_model_p),
+            'fair_price': self.fair_odds(joint_model_p), 'kelly_suggested': float(kelly_suggested), 'n_legs': len(legs),
+            'game_id': legs.game_id.astype(str).values, 'game_date': legs.game_date.astype(str).values,
+            'player_id': legs.player_id.astype(str).values, 'player_name': legs.name.values, 'side': legs.over_under.values,
+            'line': legs.number.astype(float).values, 'leg_price': legs.leg_price.astype(float).values,
+            'leg_model_p': legs.model_prob.astype(float).values})
+        os.makedirs(self.parlayDir, exist_ok=True)
+        path = os.path.join(self.parlayDir, '{}_{}_{}.parquet'.format(out.game_date.max(), now.strftime('%H%M%S'), parlay_id[:8]))
+        out.to_parquet(path, index=False)
+        logger.info('Parlay saved: {} legs at {} {} ${:.2f} ({})'.format(len(legs), book, int(price_taken), float(stake), path))
+        return parlay_id, path
+
+    @staticmethod
+    def parlay_price(prices):
+        '''American price of a parlay with no correlation adjustment: the product of the legs' decimal prices.'''
+        dec = float(np.prod([1 + p / 100 if p > 0 else 1 + 100 / abs(p) for p in prices]))
+        return int(round((dec - 1) * 100)) if dec >= 2 else int(round(-100 / (dec - 1)))
 
     def h2h(self,preds, fav, udog, spread, ovrLine):
         ovr = {}
