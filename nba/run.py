@@ -45,7 +45,8 @@ def data_pull(run_date=None):
 
 def fill_missing(days=7, today=None):
     '''
-    Re-pulls any of the last `days` dates where a scheduled game is missing box scores or team logs, and fills Q1 logs.
+    Re-pulls any of the last `days` dates where a scheduled game is missing box scores or team logs, and fills Q1 logs,
+    player tracking, and wide-open / open shots allowed.
     The daily run only pulls yesterday, so a date that failed both the 5:30 and 11:30 runs is otherwise never retried.
     A game still missing box scores 2+ days later is logged as a warning (postponed, or the source is down).
     inputs: number of days to look back, optional today (date) for testing
@@ -72,6 +73,18 @@ def fill_missing(days=7, today=None):
             etl.get_tracking_data([d])
         except Exception:
             logger.exception('Tracking pull failed for {}'.format(d))
+    shots = etl.find_shots_allowed_gaps(start, end)
+    for d in shots:  # wide-open / open shots allowed feed wide_interaction and mvGood3Rate; data_pull only tries yesterday
+        logger.info('Re-pulling shots allowed for {}: wide-open / open counts missing'.format(d))
+        try:
+            etl.update_shots_allowed([d])
+        except Exception:
+            logger.exception('Shots allowed re-pull failed for {}'.format(d))
+    if shots:
+        still = etl.find_shots_allowed_gaps(start, end)
+        logger.info('Shots allowed filled for {}; still missing {}'.format(sorted(set(shots) - set(still)) or 'no dates', still or 'none'))
+        if set(shots) - set(still):
+            data.refresh_materialized_tables()  # team_def, opp_data and pgames read shotsAllowed
     after = etl.find_gaps(start, end)
     stale = after[(after.box == 0) & (after.d <= (today - dt.timedelta(days=2)).strftime('%Y-%m-%d'))]
     for _, g in stale.iterrows():

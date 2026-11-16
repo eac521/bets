@@ -138,6 +138,34 @@ def load_current_plays(user, date):
 
 
 
+@st.cache_data(ttl=300)
+def data_complete(date):
+    '''
+    Teams playing on the date, split by whether the model's inputs are complete. Complete = the team's own last game has
+    a box score, and its opponent's last game has a box score plus the wide-open / open shots allowed counts
+    (wide_interaction and mvGood3Rate are built from the opponent's defense, and that tracking feed posts late).
+    Output: (complete, incomplete) lists of team abbreviations
+    '''
+    today = pd.read_sql("""SELECT t.game_id, CAST(t.team_id AS INTEGER) AS team_id, tms.teamAbrv AS team
+                           FROM teamLog t LEFT JOIN teams tms USING (team_id) WHERE t.game_date = ?""", etl.conn, params=[date])
+    if today.empty:
+        return [], []
+    last = pd.read_sql("""
+        SELECT CAST(p.team_id AS INTEGER) AS team_id, p.game_id, p.game_date, COALESCE(MAX(p.min > 0), 0) AS box,
+               MAX(sa.wide_fg3a IS NOT NULL AND sa.open_fg3a IS NOT NULL) AS tracking
+        FROM plyrLogs p
+        LEFT JOIN shotsAllowed sa ON sa.game_id = p.game_id AND CAST(sa.team_id AS INTEGER) = CAST(p.team_id AS INTEGER)
+        WHERE p.game_date < ? AND p.game_date >= date(?, '-30 day') AND p.game_id LIKE '002%'
+        GROUP BY 1, 2, 3 ORDER BY p.game_date""", etl.conn, params=[date, date]).groupby('team_id').tail(1).set_index('team_id')
+    own_ok = today.team_id.map(last.box).fillna(1) == 1  # no game in the window (season opener): nothing to be missing
+    opp = today.merge(today, on='game_id', suffixes=('', '_opp'))
+    opp = opp[opp.team_id != opp.team_id_opp].set_index('team_id').team_id_opp
+    opp_id = today.team_id.map(opp)
+    opp_ok = (opp_id.map(last.box).fillna(1) == 1) & (opp_id.map(last.tracking).fillna(1) == 1)
+    ok = (own_ok & opp_ok).values
+    return sorted(today.team[ok]), sorted(today.team[~ok])
+
+
 # ── Line refresh: one manual snapshot of every game, then the table reads from it ──
 if not test_mode and st.sidebar.button('Refresh Lines'):
     with st.spinner('Pulling lines...'):
@@ -156,8 +184,15 @@ def run_game_leaders(game_filter, special_market):
 def bets_section(plays, games):
     '''The bets table, filters and save form. A fragment: its widgets rerun only this function, not the other tabs.'''
     edited = None
+    notes = []
     if not plays.empty and 'as_of' in plays.columns and plays.as_of.notna().any():
-        st.caption('Prices as of {:%I:%M %p} (oldest game: {:%I:%M %p})'.format(plays.as_of.max(), plays.as_of.min()))
+        notes.append('Prices as of {:%I:%M %p} (oldest game: {:%I:%M %p})'.format(plays.as_of.max(), plays.as_of.min()))
+    complete, incomplete = data_complete(run_date)
+    if complete or incomplete:
+        notes.append('Complete data: {}'.format(', '.join(complete) if incomplete and complete else 'no teams' if incomplete else 'all {} teams'.format(len(complete))))
+    if notes:
+        st.caption(' - '.join(notes), help=('Missing a box score or the opponent\'s wide-open / open shots allowed from their last game: {}. '
+                                            'Their predictions use the games before it.'.format(', '.join(incomplete))) if incomplete else None)
     if plays.empty:
         st.info('No predictions or no lines for today yet. Data may not have been refreshed, or use Refresh Lines.')
     else:
@@ -195,15 +230,17 @@ def bets_section(plays, games):
             book_cols = [b for b in BOOKS if b in filtered.columns]
             best_price = filtered[prim].max(axis=1)
             best_book = filtered[prim].fillna(-100000).idxmax(axis=1).where(best_price.notna())
-            book_filter = st.selectbox('Book', ['All'] + book_cols)
+            book_filter = st.selectbox('Book', ['All'] + prim)  # rows where this book has the best price
             odds_range = st.slider('Odds Range', min_value=-1000, max_value=2000, value=(-200, 1000), step=50)
             if team_filter != 'All':
                 filtered = filtered[filtered['team'] == team_filter]
 
-            # Each row is priced at one book: the chosen book, or the best primary book when no book is chosen
+            # Each row is priced at its best primary book; the Book filter keeps the rows where that is the chosen book
             filtered.insert(0, 'bet', False)
             filtered['line'] = best_price
-            filtered['book'] = book_filter if book_filter != 'All' else best_book.fillna('None')
+            filtered['book'] = best_book.fillna('None')
+            if book_filter != 'All':
+                filtered = filtered[filtered['book'] == book_filter]
             book_price, book_amt, book_ev = (pd.Series(float('nan'), index=filtered.index) for _ in range(3))
             for b in book_cols:
                 at_book = filtered['book'] == b
@@ -217,8 +254,7 @@ def bets_section(plays, games):
             filtered['boost'] = 0.0  # profit boost %, e.g. 25 for a 25% boost
             filtered['free_bet'] = False
             filtered = filtered[filtered['book_price'].between(odds_range[0], odds_range[1])]  # the price the wager is sized on
-            filtered = filtered[filtered['wager'] > 0]  # no price at this book or a $0 Kelly wager
-            shown_price = ['book_price'] if book_filter != 'All' else []  # with a book chosen, its price sits next to the best price
+            filtered = filtered[filtered['wager'] > 0]  # no main-book price (Fanatics-only lines) or a $0 Kelly wager
 
             if filtered.empty:
                 st.success('No open bets with a positive wager (filters applied).')
@@ -229,7 +265,7 @@ def bets_section(plays, games):
                     ev_config.update({col: st.column_config.NumberColumn(col, format='dollar') for col in filtered.columns if col.endswith('Amount')})
                     edited = st.data_editor(
                         filtered,
-                        column_order=['bet', 'name', 'team', 'over_under', 'number', 'held', 'model_line'] + shown_price + ['line', 'wager', 'ev',
+                        column_order=['bet', 'name', 'team', 'over_under', 'number', 'held', 'model_line', 'line', 'wager', 'ev',
                                       'book', 'price', 'boost', 'free_bet'],  # everything else stays in the frame, hidden
                         disabled=['name', 'team', 'over_under', 'number', 'held', 'model_line', 'book_price', 'line', 'ev'],
                         column_config={
@@ -238,7 +274,6 @@ def bets_section(plays, games):
                             'number': st.column_config.NumberColumn('Line', format='%.1f'),
                             'held': st.column_config.TextColumn('Held', help='Lines already bet on this player today'),
                             'model_line': st.column_config.NumberColumn('Model', format='%d'),
-                            'book_price': st.column_config.NumberColumn(book_filter, format='%d', help='Price at the chosen book: wager and EV use it'),
                             'line': st.column_config.NumberColumn('Best', format='%d', help='Best price across FanDuel, DraftKings and BetMGM'),
                             'ev': st.column_config.NumberColumn('EV', format='percent'),
                             'book': st.column_config.SelectboxColumn('Book', options=BOOKS + ['None']),
@@ -288,7 +323,7 @@ def bets_section(plays, games):
 
 @st.fragment
 def special_markets(games):
-    '''Game leader, make-X and H2H calculators. A fragment, like bets_section.'''
+    '''Game leader, make-X, combined / either and H2H calculators for one game. A fragment, like bets_section.'''
     ## special markets
     st.divider()
     st.header('Special Markets')
@@ -328,10 +363,10 @@ def special_markets(games):
         pmfs = pool[nums].fillna(0)
         pool['exp'] = (pmfs * nums).sum(axis=1) / pmfs.sum(axis=1)
         pool = pool.nlargest(8, 'exp').set_index('player_id')  # the 8 highest expected makes in the game
+        label = lambda pid: '{} ({}, {:.1f})'.format(pool.loc[pid, 'name'], pool.loc[pid, 'team'], pool.loc[pid, 'exp'])
         if len(pool) < 2:
             st.info('Fewer than two predicted players in this game.')
         else:
-            label = lambda pid: '{} ({}, {:.1f})'.format(pool.loc[pid, 'name'], pool.loc[pid, 'team'], pool.loc[pid, 'exp'])
             c1, c2, c3 = st.columns(3)
             pa = c1.selectbox('Player A', pool.index.tolist(), index=0, format_func=label, key='combo_a')
             pb = c2.selectbox('Player B', pool.index.tolist(), index=1, format_func=label, key='combo_b')
@@ -354,17 +389,20 @@ def special_markets(games):
                                'Expected combined makes: {:.1f}. The model\'s distributions run narrow, so prices above the expected total '
                                'come out too long (safe side) and prices at or below it too short (distrust those).'.format(exp_total))
 
-    st.subheader('H2H')
-
-    col1, col2 = st.columns(2)
-    fav = col1.selectbox('Favorite', special_market['name'].unique())
-    udog = col2.selectbox('Underdog', special_market['name'].unique())
-    spread = st.number_input('Spread', value=0.5,step=1.0)
-    ovrLine = st.number_input('Over/Under Line', value=5.5,step=1.0)
-
-    if st.button('Calculate H2H'):
-        result = od.h2h(special_market, fav, udog, spread, ovrLine)
-        st.dataframe(result)
+        st.subheader('H2H')
+        if len(pool) >= 2:
+            col1, col2 = st.columns(2)
+            fav = col1.selectbox('Favorite', pool.index.tolist(), index=0, format_func=label, key='h2h_fav')
+            udog = col2.selectbox('Underdog', pool.index.tolist(), index=1, format_func=label, key='h2h_udog')
+            spread = st.number_input('Spread', value=0.5,step=1.0)
+            ovrLine = st.number_input('Over/Under Line', value=5.5,step=1.0)
+            if fav == udog:
+                st.warning('Pick two different players.')
+            elif st.button('Calculate H2H'):
+                result = od.h2h(special_market, pool.loc[fav, 'name'], pool.loc[udog, 'name'], spread, ovrLine)
+                st.dataframe(result)
+    else:
+        st.caption('Pick a game to see Game Leader, Combined / Either and H2H.')
 
 
 
@@ -403,4 +441,4 @@ with bets_tab:
     special_markets(games)
 
 with parlays_tab:
-    parlay_view.render(plays, games, get_preds(MODEL_NAME, run_date, pivot=True), od, active_user, run_date, BOOKS)
+    parlay_view.render(plays, games, get_preds(MODEL_NAME, run_date, pivot=True), od, active_user, run_date, PRIMARY)  # no Fanatics for now: limited stakes

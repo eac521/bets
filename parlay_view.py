@@ -1,6 +1,6 @@
 """
 Parlays tab: pick a book, tick two or three of its +EV plays, and price every combination (each pair and the three-leg).
-Enter the book's parlay price to get EV and the Kelly stake; Save records the ticket to parquet (nba/data/parlays).
+Only plays where that book has the best price are listed. Enter the book's parlay price to get EV and the Kelly stake; Save records the ticket to parquet (nba/data/parlays).
 Results and P&L still come from the Pikkit reconcile. Rendered by app.py as its second tab.
 """
 from itertools import combinations
@@ -41,16 +41,18 @@ def render(plays, games, preds, od, user, date, books):
         return
     book = st.selectbox('Book', book_cols, key='parlay_book')
     ev_col, amt_col = '{}EV'.format(PREFIX[book]), '{}Amount'.format(PREFIX[book])
-    p = plays[plays[book].notna() & (plays[amt_col] > 0)].copy()  # this book's +EV plays only: books are never mixed
+    best = plays[book_cols].max(axis=1)  # best price across the books you bet; a tie counts as best
+    p = plays[plays[book].notna() & (plays[amt_col] > 0) & (plays[book] >= best)].copy()  # +EV here and no better price elsewhere
     if p.empty:
-        st.info('No +EV plays at {} right now.'.format(book))
+        st.info('No +EV plays where {} has the best price right now.'.format(book))
         return
     p = p.assign(leg_price=p[book], ev=p[ev_col], kelly=p[amt_col]).sort_values('ev', ascending=False).reset_index(drop=True)
     game_of = {t: (g.game_id, g.game_label) for g in games.itertuples() for t in g.game_label.split(' @ ')}
     p['game_id'] = [game_of.get(t, (None, None))[0] for t in p.team]
     p['game'] = [game_of.get(t, (None, t))[1] for t in p.team]
 
-    st.caption('Tick two or three plays (the box at the left of each row).')
+    st.caption('+EV plays where {} has the best price (ties included) across {}. Tick two or three (the box at the left of each row).'.format(
+        book, ', '.join(book_cols)))
     event = st.dataframe(
         p[['name', 'team', 'over_under', 'number', 'model_prob', 'model_line', 'leg_price', 'ev', 'kelly']],
         on_select='rerun', selection_mode='multi-row', key='parlay_pick_{}'.format(book), hide_index=True, width='content',
