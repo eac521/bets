@@ -94,7 +94,7 @@ def range_frame(bets, adj, start, end):
     s = bets[bets.status.isin(['win', 'loss']) & bets.date.between(start, end)]
     days = pd.date_range(start, end).strftime('%Y-%m-%d')
     daily = s.pivot_table(index='date', columns='bet_book', values='profit', aggfunc='sum').reindex(days).fillna(0.0)
-    parlays = adj[(adj.source == 'parlay') & adj.date.between(start, end)].groupby('date').amount.sum()
+    parlays = adj[adj.source.isin(['parlay', 'cashout', 'grade']) & adj.date.between(start, end)].groupby('date').amount.sum()  # straight-side money too
     daily['Total'] = daily.sum(axis=1) + parlays.reindex(days).fillna(0.0)
     origin = (pd.Timestamp(start) - pd.Timedelta(days=1)).strftime('%Y-%m-%d')
     daily = pd.concat([pd.DataFrame(0.0, index=[origin], columns=daily.columns), daily])
@@ -235,7 +235,7 @@ def render(user, start, keep, since):
         m[3].metric('Set aside', '${:,.2f}'.format(full.set_aside.iloc[-1]))
         st.altair_chart(range_chart(long, series), width='stretch')
         st.caption('Cumulative P&L inside the chosen dates; every line starts at $0 the day before Start. A book line is settled '
-                   'straights at that book. Total = straights at every book + parlays (parlays arrive with the Pikkit import, so they lag); '
+                   'straights at that book. Total = straights at every book + parlays, cash-outs and book-grade corrections (these arrive with the Pikkit import, so they lag); '
                    'live and H2H are left out. Bankroll and set-aside are for the whole season.')
 
     st.subheader('Expected vs actual wins')

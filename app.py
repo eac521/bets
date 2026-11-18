@@ -278,7 +278,9 @@ def bets_section(plays, games):
                             'ev': st.column_config.NumberColumn('EV', format='percent'),
                             'book': st.column_config.SelectboxColumn('Book', options=BOOKS + ['None']),
                             'price': st.column_config.NumberColumn('Price taken', help="Blank = the chosen book's line", format='%d', step=1),
-                            'boost': st.column_config.NumberColumn('Boost %', min_value=0, max_value=100, step=5, format='%d%%'),
+                            'boost': st.column_config.NumberColumn('Boost %', min_value=0, max_value=100, step=5, format='%d%%',
+                                                                   help='Profit boost; settlement applies it to the price taken. Leave Price taken at the '
+                                                                        "book's price before the boost, or enter the boosted price and leave this at 0: not both"),
                             'free_bet': st.column_config.CheckboxColumn('Free bet'),
                             'wager': st.column_config.NumberColumn('Wager ($)', min_value=0.0, step=.25, format='$%.2f'),
                             **ev_config,
