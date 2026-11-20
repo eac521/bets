@@ -413,17 +413,22 @@ class odds():
         return int(round(-100 * p / (1 - p))) if p >= .5 else int(round(100 * (1 - p) / p))
 
     @staticmethod
-    def combo_threes(pmf_a, pmf_b, thresholds, either=False):
+    def combo_threes(pmf_a, pmf_b, thresholds, mode='combined'):
         '''
         Two-player threes markets from the two PMFs, assuming the players are independent (exact, no simulation).
-        Combined: P(A + B >= n), from the convolution of the PMFs. Either: P(A >= n or B >= n) = 1 - P(A < n) * P(B < n).
-        Inputs: P(threes = k) for k = 0, 1, 2, ... for each player (array-like), thresholds n, either flag
+        combined: P(A + B >= n), from the convolution of the PMFs.
+        either: P(A >= n or B >= n) = 1 - P(A < n) * P(B < n).
+        both: P(A >= n and B >= n) = P(A >= n) * P(B >= n).
+        Inputs: P(threes = k) for k = 0, 1, 2, ... for each player (array-like), thresholds n, mode
         Output: DataFrame with Makes ('n+'), Prob and Fair odds (American)
         '''
         a, b = np.asarray(pmf_a, dtype=float), np.asarray(pmf_b, dtype=float)
         a, b = a / a.sum(), b / b.sum()
         total = np.convolve(a, b)
-        prob = [1 - a[:n].sum() * b[:n].sum() if either else total[n:].sum() for n in thresholds]
+        prob_fn = {'combined': lambda n: total[n:].sum(),
+                   'either': lambda n: 1 - a[:n].sum() * b[:n].sum(),
+                   'both': lambda n: (1 - a[:n].sum()) * (1 - b[:n].sum())}[mode]
+        prob = [prob_fn(n) for n in thresholds]
         return pd.DataFrame({'Makes': ['{}+'.format(n) for n in thresholds], 'Prob': prob,
                              'Fair odds': [odds.fair_odds(p) for p in prob]})
 

@@ -15,8 +15,17 @@ def test_combined_matches_enumeration():
 
 def test_either_is_one_minus_both_under():
     a, b = [.2, .3, .3, .2], [.5, .5]
-    out = odds.combo_threes(a, b, [1, 2, 3], either=True)
+    out = odds.combo_threes(a, b, [1, 2, 3], mode='either')
     assert np.allclose(out.Prob, [1 - .2 * .5, 1 - .5 * 1, 1 - .8 * 1])
+
+
+def test_both_is_product_of_each_at_least_n():
+    a, b = [.2, .3, .3, .2], [.5, .3, .2]
+    out = odds.combo_threes(a, b, [1, 2, 3], mode='both')
+    exact = [sum(pa * pb for i, pa in enumerate(a) for j, pb in enumerate(b) if i >= n and j >= n) for n in [1, 2, 3]]
+    assert np.allclose(out.Prob, exact)
+    assert np.allclose(out.Prob, [.8 * .5, .5 * .2, .2 * 0])
+    assert out.Makes.tolist() == ['1+', '2+', '3+']
 
 
 def test_fair_odds_rounds():

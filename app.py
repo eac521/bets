@@ -359,7 +359,7 @@ def special_markets(games):
         col2.subheader('Make X Threes')
         col2.dataframe(makeX.style.format({'Prob': '{:.1%}'}))
 
-        st.subheader('Combined / Either')
+        st.subheader('Combined / Either / Both')
         nums = sorted(c for c in special_market.columns if isinstance(c, (int, float)))
         pool = special_market[~special_market['name'].isin(excluded)].copy()
         pmfs = pool[nums].fillna(0)
@@ -372,20 +372,29 @@ def special_markets(games):
             c1, c2, c3 = st.columns(3)
             pa = c1.selectbox('Player A', pool.index.tolist(), index=0, format_func=label, key='combo_a')
             pb = c2.selectbox('Player B', pool.index.tolist(), index=1, format_func=label, key='combo_b')
-            mode = c3.radio('Market', ['Combined', 'Either'], horizontal=True, key='combo_mode')
+            mode = c3.radio('Market', ['Combined', 'Either', 'Both'], horizontal=True, key='combo_mode')
             if pa == pb:
                 st.warning('Pick two different players.')
             else:
-                either = mode == 'Either'
+                thresholds = {'Combined': range(5, 10), 'Either': range(3, 8), 'Both': range(2, 7)}[mode]
                 combo = od.combo_threes(pool.loc[pa, nums].fillna(0).values, pool.loc[pb, nums].fillna(0).values,
-                                        range(3, 8) if either else range(5, 10), either=either)
-                exp_total = pool.loc[pa, 'exp'] + pool.loc[pb, 'exp']
-                if not either:
+                                        thresholds, mode=mode.lower())
+                exp_a, exp_b = pool.loc[pa, 'exp'], pool.loc[pb, 'exp']
+                exp_total = exp_a + exp_b
+                if mode == 'Combined':
                     combo['vs expected'] = ['above' if int(m[:-1]) > exp_total else 'at or below' for m in combo.Makes]
+                elif mode == 'Both':
+                    combo['vs expected'] = ['above both' if int(m[:-1]) > max(exp_a, exp_b) else
+                                            'at or below both' if int(m[:-1]) <= min(exp_a, exp_b) else 'mixed' for m in combo.Makes]
                 st.dataframe(combo.drop(columns='Prob').style.format({'Fair odds': '{:+d}'}), hide_index=True, width='content')
-                if either:
+                if mode == 'Either':
                     st.caption('Either = at least one of the two makes that many. Fair odds with the two players independent. '
-                               'Expected makes: {:.1f} and {:.1f}.'.format(pool.loc[pa, 'exp'], pool.loc[pb, 'exp']))
+                               f'Expected makes: {exp_a:.1f} and {exp_b:.1f}.')
+                elif mode == 'Both':
+                    st.caption('Both = each of the two makes at least that many. Fair odds with the two players independent. '
+                               f'Expected makes: {exp_a:.1f} and {exp_b:.1f}. The model\'s distributions run narrow, so a count above '
+                               'both players\' expected makes comes out too long (safe side), at or below both too short (distrust those), '
+                               'and mixed rows partly offset.')
                 else:
                     st.caption('Combined = the two players\' makes added together. Fair odds with the two players independent. '
                                'Expected combined makes: {:.1f}. The model\'s distributions run narrow, so prices above the expected total '
@@ -404,7 +413,7 @@ def special_markets(games):
                 result = od.h2h(special_market, pool.loc[fav, 'name'], pool.loc[udog, 'name'], spread, ovrLine)
                 st.dataframe(result)
     else:
-        st.caption('Pick a game to see Game Leader, Combined / Either and H2H.')
+        st.caption('Pick a game to see Game Leader, Combined / Either / Both and H2H.')
 
 
 
