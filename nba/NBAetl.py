@@ -318,11 +318,12 @@ class etl(base):
 		s['game_date'] = pd.to_datetime(s.gameDate).dt.strftime('%Y-%m-%d')
 		# regular-season games only (gameId 002...); Cup knockout slots have no team until the matchups are set
 		s = s[(s.gameId.astype(str).str[:3] == '002') & (s.game_date > startDate)]
-		h = s[s.homeTeam_teamId > 0][['game_date', 'gameId', 'homeTeam_teamId']].assign(home=1)
-		a = s[s.awayTeam_teamId > 0][['game_date', 'gameId', 'awayTeam_teamId']].assign(home=0)
-		h.columns = a.columns = ['game_date', 'game_id', 'team_id', 'home']
+		h = s[s.homeTeam_teamId > 0][['game_date', 'gameId', 'homeTeam_teamId', 'gameDateTimeEst']].assign(home=1)
+		a = s[s.awayTeam_teamId > 0][['game_date', 'gameId', 'awayTeam_teamId', 'gameDateTimeEst']].assign(home=0)
+		h.columns = a.columns = ['game_date', 'game_id', 'team_id', 'tip_et', 'home']
 		df = pd.concat([h, a], ignore_index=True)
 		df['team_id'] = df.team_id.astype(int).astype(str)
+		df['tip_et'] = pd.to_datetime(df.tip_et.astype(str).str.rstrip('Z'))  # ET wall-clock time; the API labels it Z
 		return df
 
 	def get_opp_shot_spot(self, game_dates):
