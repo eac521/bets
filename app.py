@@ -26,6 +26,7 @@ import player_view
 import tracking_view
 import parlay_view
 import query_view
+import injury_view
 od = funcs.odds()
 
 
@@ -172,6 +173,8 @@ if not test_mode and st.sidebar.button('Refresh Lines'):
         snap = od.pull_snapshot('manual')
     create_todays_bets.clear()
     st.sidebar.success('Pulled {} games'.format(snap.event_id.nunique() if not snap.empty else 0))
+    with st.spinner('Pulling injury report...'):
+        st.sidebar.caption(injury_view.refresh(run_date))
 
 
 @st.cache_data
@@ -232,6 +235,12 @@ def bets_section(plays, games):
             best_book = filtered[prim].fillna(-100000).idxmax(axis=1).where(best_price.notna())
             book_filter = st.selectbox('Book', ['All'] + prim)  # rows where this book has the best price
             odds_range = st.slider('Odds Range', min_value=-1000, max_value=2000, value=(-200, 1000), step=50)
+            if team_filter != 'All':
+                injury_view.render([team_filter], run_date)
+            elif game_filter != 'All':
+                injury_view.render(game_filter.split(' @ '), run_date)
+            else:
+                injury_view.render(games.game_label.str.split(' @ ').explode().tolist(), run_date)
             if team_filter != 'All':
                 filtered = filtered[filtered['team'] == team_filter]
 
