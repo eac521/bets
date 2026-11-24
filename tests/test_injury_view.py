@@ -41,3 +41,20 @@ def test_latest_saved_reads_newest_of_the_day(tmp_path, monkeypatch):
     ir.clean_report(raw(), dt.datetime(2026, 11, 25, 5, 30)).to_parquet(d / '2026-11-25_0530.parquet')
     assert pd.Timestamp(iv.latest_saved('2026-11-24').report_ts.max()) == pd.Timestamp('2026-11-24 17:00')
     assert iv.latest_saved('2026-11-23').empty
+
+
+def test_java_home_finds_the_jvm_library(tmp_path):
+    conda, brew = tmp_path / 'env' / 'lib' / 'jvm', tmp_path / 'brew'
+    (conda / 'lib' / 'jli').mkdir(parents=True)
+    (conda / 'lib' / 'jli' / 'libjli.dylib').write_text('')
+    assert iv.java_home([str(tmp_path / 'nothing'), str(conda), str(brew)]) == str(conda)
+    (brew / 'lib').mkdir(parents=True)
+    (brew / 'lib' / 'libjli.dylib').write_text('')
+    assert iv.java_home([str(brew)]) == str(brew)
+
+
+def test_ensure_java_keeps_an_existing_java_home(monkeypatch):
+    monkeypatch.setenv('JAVA_HOME', '/already/set')
+    iv.ensure_java()
+    import os
+    assert os.environ['JAVA_HOME'] == '/already/set'

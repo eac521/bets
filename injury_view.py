@@ -6,6 +6,8 @@ import datetime as dt
 import glob
 import logging
 import os
+import subprocess
+import sys
 
 import pandas as pd
 import streamlit as st
@@ -27,6 +29,31 @@ TEAMS = {
     'Utah Jazz': 'UTA', 'Washington Wizards': 'WAS'}
 
 
+JAVA_HOMES = [os.path.join(sys.prefix, 'lib', 'jvm'), sys.prefix,  # conda openjdk (in the app's env)
+              '/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home', '/usr/local/opt/openjdk/libexec/openjdk.jdk/Contents/Home']
+
+
+def java_home(candidates=JAVA_HOMES):
+    '''First folder holding the JVM library (tabula, inside nbainjuries, needs it), else macOS's java_home, else None.'''
+    for home in candidates:
+        if any(os.path.exists(os.path.join(home, 'lib', sub, 'libjli.dylib')) for sub in ('jli', '')):
+            return home
+    try:
+        out = subprocess.run(['/usr/libexec/java_home'], capture_output=True, text=True, timeout=5)
+        return out.stdout.strip() if out.returncode == 0 and out.stdout.strip() else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def ensure_java():
+    '''Sets JAVA_HOME when the app was launched without it (a boot job doesn't load the shell profile or conda activate).'''
+    if not os.environ.get('JAVA_HOME'):
+        home = java_home()
+        if home:
+            os.environ['JAVA_HOME'] = home
+            logger.info(f'JAVA_HOME set to {home}')
+
+
 def season_of(date):
     '''YYYY-MM-DD -> '2026-27' '''
     y, m = int(date[:4]), int(date[5:7])
@@ -36,6 +63,7 @@ def season_of(date):
 
 def pull(date):
     '''Newest report published by now (saved by injury_reports if it isn't on disk yet). Output: (report_ts or None, state)'''
+    ensure_java()
     return ir.resolve(season_of(date), dt.datetime.now(), {}, pause=(0, 0))
 
 
@@ -56,7 +84,7 @@ def load(date):
     except Exception as e:  # nbainjuries / Java missing, nba.com unreachable
         logger.warning(f'Injury report pull failed: {e}')
         return rep, str(e)
-    return latest_saved(date), None if state == 'ok' else f'no report pulled ({state})'
+    return latest_saved(date), None if state == 'ok' else f'no report pulled ({state}); see logs/nba_pipeline.log'
 
 
 def refresh(date):
@@ -67,7 +95,7 @@ def refresh(date):
         return f'Injury report not updated: {e}'
     finally:
         load.clear()
-    return f'Injury report as of {ts:%I:%M %p}' if state == 'ok' else f'Injury report not updated ({state})'
+    return f'Injury report as of {ts:%I:%M %p}' if state == 'ok' else f'Injury report not updated ({state}); see logs/nba_pipeline.log'
 
 
 def for_game(rep, teams, date):
