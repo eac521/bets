@@ -28,6 +28,21 @@ def test_find_gaps_flags_each_missing_load():
     assert g.loc['0022600003', ['box', 'team', 'q1']].tolist() == [1, 0, 0]
 
 
+def test_find_shots_allowed_gaps():
+    e = make_etl()
+    e.conn.execute('CREATE TABLE shotsAllowed (team_id TEXT, game_date TEXT, game_id TEXT, ra_fga REAL, abv_fga REAL, wide_fg3a REAL, open_fg3a REAL)')
+    e.conn.executemany('INSERT INTO shotsAllowed VALUES (?,?,?,?,?,?,?)', [
+        ('a', '2026-10-28', '0022600001', 30, 25, 18, 12),      # complete
+        ('b', '2026-10-28', '0022600001', 28, 27, 15, 14),
+        ('a', '2026-10-29', '0022600003', 31, 22, None, None),  # zones loaded, tracking missing
+        ('b', '2026-10-30', '0022600004', 29, 30, 17, None),    # open counts missing
+        ('c', '2026-10-31', '0022600005', 0, 0, None, None),    # not played yet: not a gap
+        ('d', '2026-10-29', '0012600009', 30, 20, None, None),  # preseason: ignored
+    ])
+    assert e.find_shots_allowed_gaps('2026-10-28', '2026-10-31') == ['2026-10-29', '2026-10-30']
+    assert e.find_shots_allowed_gaps('2026-10-28', '2026-10-28') == []
+
+
 class FakeEndpoint:
     '''Stands in for nba_api endpoints: returns one frame shaped like the real response.'''
     def __init__(self, **kw):

@@ -198,6 +198,15 @@ class etl(base):
 			  AND date(game_date) NOT IN (SELECT DISTINCT date(game_date) FROM playerTracking WHERE date(game_date) BETWEEN ? AND ?)
 			ORDER BY 1""", self.conn, params=[start, end, start, end]).d.tolist()
 
+	def find_shots_allowed_gaps(self, start, end):
+		'''Dates between start and end where a team's shot zones are loaded but its wide-open / open shots allowed are missing
+		(the tracking feed often posts hours after the box score).'''
+		return pd.read_sql("""
+			SELECT DISTINCT date(game_date) AS d FROM shotsAllowed
+			WHERE date(game_date) BETWEEN ? AND ? AND game_id LIKE '002%'
+			  AND (wide_fg3a IS NULL OR open_fg3a IS NULL) AND COALESCE(ra_fga, 0) + COALESCE(abv_fga, 0) > 0
+			ORDER BY 1""", self.conn, params=[start, end]).d.tolist()
+
 	def update_teamLog(self,game_ids):
 		df = self.get_summary(game_ids)
 		strD = ','.join(["'{}'".format(d) for d in df.game_id.unique()])
