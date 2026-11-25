@@ -141,6 +141,12 @@ def run_pipeline(model_name, run_date=None):
     if result.returncode != 0:
         logger.warning('Validation tests failed; continuing with predictions')
     lines = run_model(model_name, run_date)
+    if model_name == 'threes':
+        try:  # shadow model (interaction features), parquet only; never blocks production
+            from .shadow import run_shadow
+            run_shadow([run_date] if run_date else None)
+        except Exception:
+            logger.exception('Shadow model failed')
     if run_date is None:
         # opening odds snapshot after the morning run; the 11:30 run skips it once today's open exists
         try:
