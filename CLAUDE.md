@@ -46,7 +46,7 @@ This system makes real-money decisions every day. When unsure, stop and ask.
 - Run `make test` after changes on the mini and show me the result.
 - `odds_featured.py` uses paths relative to the repo root — run from the root (notebooks must `os.chdir` there).
 - `odds_hist_featured/team_lines_wide.parquet` is derived and not auto-refreshed; rebuild after a featured pull (`python -m nba.odds_featured --season <season> --run --build-wide`).
-- Environments: `nba_mini_env` (mini), `nba_env` (MacBook), Python 3.11, editable install (`pip install -e .`; rerun after moving a clone).
+- Environments: `mini_nba_env` (mini), `nba_env` (MacBook), Python 3.11, editable install (`pip install -e .`; rerun after moving a clone).
 
 ## Modeling guardrails
 
