@@ -50,3 +50,4 @@ database/
 *.db
 *.db-wal
 *.db-shm
+notes/

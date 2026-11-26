@@ -1,5 +1,11 @@
 # CLAUDE.md — NBA betting models
 
+## Python environment (required)
+- Every Python, pytest, or make command must run through conda:
+  - MacBook: `conda run -n nba_env --no-capture-output <command>`
+  - Mac mini: `conda run -n mini_nba_env --no-capture-output <command>`
+- Check which machine you're on with `hostname` first. Never use the base env or system Python.
+
 Live NBA player-prop betting system. Core model: MNLogit (statsmodels) predicting a full PMF of threes made (0 to cap) per player-game, priced against FanDuel / DraftKings / BetMGM, sized with 1/8 Kelly on a compounding bankroll. Streamlit app + a 5:30am / 11:30am pipeline run on the Mac mini. Points model and a second "who's playing" layer are in development on `dev`.
 
 This system makes real-money decisions every day. When unsure, stop and ask.
@@ -63,3 +69,15 @@ This system makes real-money decisions every day. When unsure, stop and ask.
 - Show the diff and say what you ran.
 - For analysis, go one step at a time (one function or check, review the output, then the next). Give me code to run rather than running whole analyses on your own.
 - Push back when you think I'm wrong, with reasons.
+
+## Hand-offs
+- When I say "hand off" (or context is getting full), write `notes/<task-slug>.md` and stop:
+  - Goal (one line)
+  - Done so far
+  - Files changed
+  - Decisions made, and why
+  - Open issues / what's untested
+  - Next step (the exact first action for the next session)
+- Keep it under ~40 lines. Overwrite the same file for the same task; don't append history.
+- When I say "resume <task-slug>", read `notes/<task-slug>.md`, check `git status` and `git log --oneline -5`, confirm where we are, then continue.
+- If a note records a decision worth keeping, tell me so I can move it to `docs/decisions/` and commit it.
